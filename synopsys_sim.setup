@@ -1,0 +1,2 @@
+xil_defaultlib:vcs_lib/xil_defaultlib
+OTHERS=/home/jerry/workspace/hdl/xilinxip_vcs/synopsys_sim.setup

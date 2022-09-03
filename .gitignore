@@ -1,0 +1,8 @@
+!**/.keep
+**/*.v
+**/tmp/
+**/simWorkspace/
+**/target/
+**/.bsp
+**/.idea
+!./synopsys_sim.setup
