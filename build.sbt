@@ -1,6 +1,5 @@
 ThisBuild / version := "1.0"
-ThisBuild / scalaVersion := "2.12.16"
-ThisBuild / organization := "org.example"
+ThisBuild / scalaVersion := "2.12.13"
 
 val spinalVersion = "1.7.1"
 val spinalCore = "com.github.spinalhdl" %% "spinalhdl-core" % spinalVersion
@@ -9,7 +8,7 @@ val spinalIdslPlugin = compilerPlugin("com.github.spinalhdl" %% "spinalhdl-idsl-
 
 lazy val template = (project in file("."))
   .settings(
-    name := "SpinalTemplate",
+    name := "test",
     libraryDependencies ++= Seq(spinalCore, spinalLib, spinalIdslPlugin)
   )
 
