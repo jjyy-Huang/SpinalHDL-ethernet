@@ -179,6 +179,8 @@ class AXI4StreamInsertTopLevel(config : MergeGenerics) extends Component {
 		issueCacheLoaded := False
 	} elsewhen (receiveComplete && issueCacheReady) {
 		issueCacheLoaded := True
+	} elsewhen (issueCacheLoaded && issueCacheReady) {
+		issueCacheLoaded := False
 	} otherwise {
 		issueCacheLoaded := issueCacheLoaded
 	}
