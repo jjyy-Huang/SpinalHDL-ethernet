@@ -57,13 +57,14 @@ object Sim extends App {
 				dut.io.dataIn_AXIS.port.last #= false
 
 			}
+			driverInit()
 
 			for (i <- 0 until 10) {
 				dut.clockDomain.waitRisingEdge()
 			}
 			dut.io.headerIn_AXIS.port.valid #= true
-			dut.io.headerIn_AXIS.port.keep #= 7
-			dut.io.headerIn_AXIS.port.user #= 3
+			dut.io.headerIn_AXIS.port.keep #= 15
+			dut.io.headerIn_AXIS.port.user #= 4
 			dut.io.headerIn_AXIS.port.data #= abs(Random.nextInt() % pow(2, 32)).toInt
 			dut.clockDomain.waitRisingEdge()
 
@@ -71,9 +72,25 @@ object Sim extends App {
 			dut.io.headerIn_AXIS.port.keep #= 0
 			dut.io.headerIn_AXIS.port.user #= 0
 			dut.io.headerIn_AXIS.port.data #= 0
+			dut.clockDomain.waitRisingEdge(3)
 
 			var times: Int = 4
 			for (i <- 0 until times) {
+				dut.io.dataIn_AXIS.port.valid #= true
+				dut.io.dataIn_AXIS.port.keep #= 15
+				dut.io.dataIn_AXIS.port.data #= abs(Random.nextInt() % pow(2, 32)).toInt
+				dut.io.dataIn_AXIS.port.last #= false
+				dut.clockDomain.waitRisingEdge()
+			}
+
+			dut.io.dataIn_AXIS.port.valid #= false
+			dut.io.dataOut_AXIS.port.ready #= false
+			dut.clockDomain.waitRisingEdge(2)
+			dut.io.dataOut_AXIS.port.ready #= true
+			dut.clockDomain.waitRisingEdge(2)
+
+
+			for (i <- 0 until 2) {
 				dut.io.dataIn_AXIS.port.valid #= true
 				dut.io.dataIn_AXIS.port.keep #= 15
 				dut.io.dataIn_AXIS.port.data #= abs(Random.nextInt() % pow(2, 32)).toInt

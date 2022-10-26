@@ -1,7 +1,8 @@
 package merge
 
 import spinal.core._
-
+import spinal.lib._
+import scala.math._
 case class MergeGenerics (
 	DATA_WD : Int,
 	DATA_BYTE_WD : Int,
@@ -18,12 +19,11 @@ class AXI4StreamInsertTopLevel(config : MergeGenerics) extends Component {
 	noIoPrefix()
 
 	val getHeader = Bool() setAsReg() init False
-	val transComplete = io.dataOut_AXIS.port.isLast setAsReg() init False
 	val receiveComplete = Bool setAsReg() init False
 
 	when (io.headerIn_AXIS.port.fire) {
 		getHeader := True
-	} elsewhen (transComplete) {
+	} elsewhen (io.dataOut_AXIS.port.isLast) {
 		getHeader := False
 	} otherwise {
 		getHeader := getHeader
@@ -31,23 +31,71 @@ class AXI4StreamInsertTopLevel(config : MergeGenerics) extends Component {
 
 	when (io.dataIn_AXIS.port.isLast) {
 		receiveComplete := True
-	} otherwise {
+	} elsewhen (io.dataOut_AXIS.port.isLast) {
 		receiveComplete := False
+	} otherwise {
+		receiveComplete := receiveComplete
 	}
 
-	val selectedMode = UInt(config.BYTE_CNT_WD bits) setAsReg() init 0
+	val selectedMode = UInt(config.DATA_BYTE_WD bits) setAsReg() init 0
 	when (io.headerIn_AXIS.port.fire) {
-		selectedMode := io.headerIn_AXIS.port.user.resize(config.BYTE_CNT_WD).asUInt
+		selectedMode := io.headerIn_AXIS.port.user.asUInt
 	} otherwise {
 		selectedMode := selectedMode
 	}
 
+	val remainCnt = UInt(config.DATA_BYTE_WD bits) setAsReg() init 0
+	when(io.dataIn_AXIS.port.isLast) {
+		remainCnt := selectedMode + CountOne(io.dataIn_AXIS.port.keep)
+	} otherwise {
+		remainCnt := remainCnt
+	}
+
+	val delayCycle = UInt(2 bits)
+	val lastKeep = Bits(config.DATA_BYTE_WD bits)
+
+
+
+	val delayCnt = UInt(4 bits) setAsReg() init 0
+	when (io.headerIn_AXIS.port.isLast) {
+		delayCnt := 0
+	} elsewhen (receiveComplete && io.dataOut_AXIS.port.ready) {
+		delayCnt := delayCnt + 1
+	} otherwise {
+		delayCnt := delayCnt
+	}
+
+	switch (remainCnt) {
+		for (i <- 1 to config.DATA_BYTE_WD * 2) {
+			is (i) {
+				def sumPow(a: Int): Int = {
+					var sum: Int = 0
+					for (j <- config.DATA_BYTE_WD - a until  config.DATA_BYTE_WD) {
+						sum += pow(2, j).toInt
+					}
+					sum
+				}
+				if (i <= config.DATA_BYTE_WD) {
+					delayCycle := 0
+					lastKeep := B(sumPow(i))
+				} else {
+					delayCycle := 1
+					lastKeep := B(sumPow(i - config.DATA_BYTE_WD))
+				}
+			}
+		}
+		default {
+			delayCycle := 0
+			lastKeep := 15
+		}
+	}
+
 	val dataCache = Array.fill(config.DATA_BYTE_WD)(Bits(config.DATA_WD/config.DATA_BYTE_WD bits) setAsReg() init 0, Bool setAsReg() init False)
-	val issueCache = Array.fill(config.DATA_BYTE_WD)(Bits(config.DATA_WD/config.DATA_BYTE_WD bits) setAsReg() init 0, Bool setAsReg() init False)
-	val issueCacheReady = Bool setAsReg() init False
+	val issueCache = Array.fill(config.DATA_BYTE_WD)(Bits(config.DATA_WD/config.DATA_BYTE_WD bits) setAsReg() init 0)
+	val issueCacheReady = Bool()
 	val bypassData = Array.fill(config.DATA_BYTE_WD)(Bits(config.DATA_WD/config.DATA_BYTE_WD bits), Bool)
 
-	issueCacheReady := io.dataOut_AXIS.port.ready || ~io.dataOut_AXIS.port.valid
+	issueCacheReady := io.dataOut_AXIS.port.ready
 
 	io.dataIn_AXIS.port.ready := issueCacheReady && getHeader
 	io.headerIn_AXIS.port.ready := issueCacheReady && !getHeader
@@ -102,50 +150,46 @@ class AXI4StreamInsertTopLevel(config : MergeGenerics) extends Component {
 	issueCache.zipWithIndex.foreach { case (u, idx) =>
 		when (!getHeader) {
 			when (mappedHeader(idx)._2) {
-				u._1 := mappedHeader(idx)._1
-				u._2 := mappedHeader(idx)._2
+				u := mappedHeader(idx)._1
 			} otherwise {
-				u._1 := u._1
-				u._2 := u._2
+				u := u
 			}
 		} otherwise {
 			when (io.dataIn_AXIS.port.fire) {
-				when (mappedData(idx)._2) {
-					u._1 := mappedData(idx)._1
-					u._2 := mappedData(idx)._2
+				when (mappedData(idx)._2 && issueCacheReady) {
+					u := mappedData(idx)._1
 				} otherwise {
-					u._1 := u._1
-					u._2 := u._2
+					u := u
 				}
 			} elsewhen (receiveComplete && issueCacheReady) {
-				u._1 := mappedData(idx)._1
-				u._2 := mappedData(idx)._2
+				u := mappedData(idx)._1
 			} otherwise {
-				u._1 := u._1
-				u._2 := u._2
+				u := u
 			}
 		}
 	}
 
 
 	val issueCacheLoaded = Bool() setAsReg() init False
-	val (t1, t2) = issueCache.reduce((a, b) => (a._1 ## b._1, a._2 && b._2))
-	val (t3, t4) = issueCache.reduce((a, b) => (a._1 ## b._1, a._2 || b._2))
-	when (t2) {
+	val combineData= issueCache.reduce(_ ## _)
+
+	when (io.dataIn_AXIS.port.fire) {
 		issueCacheLoaded := True
-	} elsewhen (t4 && receiveComplete && issueCacheReady) {
+	} elsewhen (io.dataOut_AXIS.port.isLast) {
+		issueCacheLoaded := False
+	} elsewhen (receiveComplete && issueCacheReady) {
 		issueCacheLoaded := True
 	} otherwise {
-		issueCacheLoaded := False
+		issueCacheLoaded := issueCacheLoaded
 	}
 	io.dataOut_AXIS.port.valid := issueCacheLoaded
-	io.dataOut_AXIS.port.data := t1
-	io.dataOut_AXIS.port.keep := 0
+	io.dataOut_AXIS.port.data := combineData
 
-	when (t4 && receiveComplete && issueCacheReady) {
-		io.dataOut_AXIS.port.last := receiveComplete
+	when (receiveComplete && io.dataOut_AXIS.port.ready && delayCnt === delayCycle) {
+		io.dataOut_AXIS.port.last := True
+		io.dataOut_AXIS.port.keep := lastKeep
 	} otherwise {
 		io.dataOut_AXIS.port.last := False
+		io.dataOut_AXIS.port.keep := B("1111")
 	}
-
 }
