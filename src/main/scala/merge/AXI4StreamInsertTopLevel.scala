@@ -1,6 +1,7 @@
 package merge
 
 import spinal.core._
+import spinal.core.sim._
 import spinal.lib._
 import scala.math._
 case class MergeGenerics (
@@ -18,7 +19,7 @@ class AXI4StreamInsertTopLevel(config : MergeGenerics) extends Component {
 	}
 	noIoPrefix()
 
-	val getHeader = Bool() setAsReg() init False
+	val getHeader = Bool() setAsReg() init False simPublic()
 	val receiveComplete = Bool setAsReg() init False
 
 	when (io.headerIn_AXIS.port.fire) {
@@ -29,7 +30,7 @@ class AXI4StreamInsertTopLevel(config : MergeGenerics) extends Component {
 		getHeader := getHeader
 	}
 
-	when (io.dataIn_AXIS.port.isLast) {
+	when (io.dataIn_AXIS.port.isLast && getHeader && io.dataIn_AXIS.port.fire) {
 		receiveComplete := True
 	} elsewhen (io.dataOut_AXIS.port.isLast) {
 		receiveComplete := False
@@ -57,7 +58,7 @@ class AXI4StreamInsertTopLevel(config : MergeGenerics) extends Component {
 
 
 	val delayCnt = UInt(4 bits) setAsReg() init 0
-	when (io.headerIn_AXIS.port.isLast) {
+	when (io.dataOut_AXIS.port.isLast) {
 		delayCnt := 0
 	} elsewhen (receiveComplete && io.dataOut_AXIS.port.ready) {
 		delayCnt := delayCnt + 1
@@ -110,6 +111,8 @@ class AXI4StreamInsertTopLevel(config : MergeGenerics) extends Component {
 			u._1 := io.dataIn_AXIS.port.data( 8 * (i + 1) - 1 downto 8 * i)
 			u._2 := io.dataIn_AXIS.port.keep(i)
 		}
+	} elsewhen (io.dataOut_AXIS.port.isLast) {
+		dataCache.foreach { u => u._1 := 0; u._2 := False }
 	} otherwise {
 		dataCache.foreach{ u => u._1 := u._1; u._2 := u._2}
 	}
@@ -192,6 +195,6 @@ class AXI4StreamInsertTopLevel(config : MergeGenerics) extends Component {
 		io.dataOut_AXIS.port.keep := lastKeep
 	} otherwise {
 		io.dataOut_AXIS.port.last := False
-		io.dataOut_AXIS.port.keep := B("1111")
+		io.dataOut_AXIS.port.keep := Bits (config.DATA_BYTE_WD bits) setAllTo True
 	}
 }
