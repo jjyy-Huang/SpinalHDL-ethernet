@@ -119,14 +119,14 @@ class AXI4StreamInsertTopLevel(config : MergeGenerics) extends Component {
 	when(io.dataAxisOut.port.isLast) {
 		delayReg.foreach(reg => reg := False)
 		delayLoaded.clear()
-	} elsewhen (io.dataAxisIn.port.lastFire & io.dataAxisOut.port.ready & !delayLoaded) {
+	} elsewhen (io.dataAxisIn.port.last.fall() & io.dataAxisOut.port.ready & !delayLoaded) {
 		delayLoaded.set()
 		when (oneMoreCycle) {
-			delayReg(1) := True
-		} otherwise {
 			delayReg(2) := True
+		} otherwise {
+			delayReg(3) := True
 		}
-	} elsewhen (io.dataAxisIn.port.lastFire & !delayLoaded) {
+	} elsewhen (io.dataAxisIn.port.last.fall() & !delayLoaded) {
 		delayLoaded.set()
 		when(oneMoreCycle) {
 			delayReg(0) := True
