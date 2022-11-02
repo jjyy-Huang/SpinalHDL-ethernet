@@ -2,199 +2,174 @@ package merge
 
 import spinal.core._
 import spinal.core.sim._
+import spinal.lib
 import spinal.lib._
+import spinal.lib.bus.amba4.axis.Axi4Stream
+
 import scala.math._
 case class MergeGenerics (
 	DATA_WD : Int,
 	DATA_BYTE_WD : Int,
+	BYTE_WD : Int,
 	BYTE_CNT_WD : Int
 )
 
 class AXI4StreamInsertTopLevel(config : MergeGenerics) extends Component {
-
 	val io = new Bundle {
-		val dataIn_AXIS = AXI4SDataInInterface(config.DATA_BYTE_WD)
-		val headerIn_AXIS = AXI4SHeaderInInterface(config.DATA_BYTE_WD)
-		val dataOut_AXIS = AXI4SInsertedInterface(config.DATA_BYTE_WD)
+		val dataAxisIn = AXI4SDataInInterface(config.DATA_BYTE_WD)
+		val headerAxisIn = AXI4SHeaderInInterface(config.DATA_BYTE_WD)
+		val dataAxisOut = AXI4SInsertedInterface(config.DATA_BYTE_WD)
 	}
 	noIoPrefix()
 
 	val getHeader = Bool() setAsReg() init False simPublic()
-	val receiveComplete = Bool setAsReg() init False
+	val bypassMask = Bits(config.DATA_BYTE_WD bits) setAsReg() init 0
+	val headerKeep = bypassMask
+	val dataKeep = Bits(config.DATA_BYTE_WD bits) setAsReg() init 0
+	val receiveComplete = Bool() setAsReg() init False
 
-	when (io.headerIn_AXIS.port.fire) {
+	val oneMoreCycle = Bool() setAsReg() init True
+
+	when (io.dataAxisIn.port.lastFire) {
+		oneMoreCycle := (headerKeep & io.dataAxisIn.port.keep).orR
+	} elsewhen (io.dataAxisOut.port.lastFire) {
+		oneMoreCycle := True
+	} otherwise {
+		oneMoreCycle := oneMoreCycle
+	}
+
+	when (io.headerAxisIn.port.fire) {
 		getHeader := True
-	} elsewhen (io.dataOut_AXIS.port.isLast) {
+		bypassMask := io.headerAxisIn.port.keep
+	} elsewhen (io.dataAxisOut.port.lastFire) {
 		getHeader := False
 	} otherwise {
 		getHeader := getHeader
+		bypassMask := bypassMask
 	}
 
-	when (io.dataIn_AXIS.port.isLast && getHeader && io.dataIn_AXIS.port.fire) {
+	when (io.dataAxisIn.port.lastFire) {
+		dataKeep := io.dataAxisIn.port.keep
+	} otherwise {
+		dataKeep := dataKeep
+	}
+
+	when (io.dataAxisIn.port.lastFire) {
 		receiveComplete := True
-	} elsewhen (io.dataOut_AXIS.port.isLast) {
+	} elsewhen (io.dataAxisOut.port.lastFire) {
 		receiveComplete := False
 	} otherwise {
 		receiveComplete := receiveComplete
 	}
 
-	val selectedMode = UInt(config.DATA_BYTE_WD bits) setAsReg() init 0
-	when (io.headerIn_AXIS.port.fire) {
-		selectedMode := io.headerIn_AXIS.port.user.asUInt
+	val rotateRightBits = UInt(config.BYTE_CNT_WD bits) setAsReg() init 0
+	when (io.headerAxisIn.port.fire) {
+		rotateRightBits := io.headerAxisIn.port.user.asUInt.resized
 	} otherwise {
-		selectedMode := selectedMode
+		rotateRightBits := rotateRightBits
 	}
 
-	val remainCnt = UInt(config.DATA_BYTE_WD bits) setAsReg() init 0
-	when(io.dataIn_AXIS.port.isLast) {
-		remainCnt := selectedMode + CountOne(io.dataIn_AXIS.port.keep)
-	} otherwise {
-		remainCnt := remainCnt
-	}
+	val inputStreams = Vec(io.headerAxisIn.port.toBitStream(), io.dataAxisIn.port.toBitStream())
+	val selectedStream = StreamMux(getHeader.asUInt, inputStreams)
+	val forkedStreams = StreamFork(selectedStream, 2, true)
 
-	val delayCycle = UInt(2 bits)
-	val lastKeep = Bits(config.DATA_BYTE_WD bits)
-
-
-
-	val delayCnt = UInt(4 bits) setAsReg() init 0
-	when (io.dataOut_AXIS.port.isLast) {
-		delayCnt := 0
-	} elsewhen (receiveComplete && io.dataOut_AXIS.port.ready) {
-		delayCnt := delayCnt + 1
-	} otherwise {
-		delayCnt := delayCnt
-	}
-
-	switch (remainCnt) {
-		for (i <- 1 to config.DATA_BYTE_WD * 2) {
-			is (i) {
-				def sumPow(a: Int): Int = {
-					var sum: Int = 0
-					for (j <- config.DATA_BYTE_WD - a until  config.DATA_BYTE_WD) {
-						sum += pow(2, j).toInt
-					}
-					sum
-				}
-				if (i <= config.DATA_BYTE_WD) {
-					delayCycle := 0
-					lastKeep := B(sumPow(i))
-				} else {
-					delayCycle := 1
-					lastKeep := B(sumPow(i - config.DATA_BYTE_WD))
-				}
-			}
-		}
-		default {
-			delayCycle := 0
-			lastKeep := 15
+	val firstStage = forkedStreams(0) stage() s2mPipe() continueWhen(selectedStream.fire | receiveComplete)
+	when (io.dataAxisIn.port.last.fall()) {
+		when (!oneMoreCycle) {
+			firstStage.setIdle()
 		}
 	}
+	val secondStage = firstStage.clone()
+	val bypassPath = forkedStreams(1) combStage()
 
-	val dataCache = Array.fill(config.DATA_BYTE_WD)(Bits(config.DATA_WD/config.DATA_BYTE_WD bits) setAsReg() init 0, Bool setAsReg() init False)
-	val issueCache = Array.fill(config.DATA_BYTE_WD)(Bits(config.DATA_WD/config.DATA_BYTE_WD bits) setAsReg() init 0)
-	val issueCacheReady = Bool()
-	val bypassData = Array.fill(config.DATA_BYTE_WD)(Bits(config.DATA_WD/config.DATA_BYTE_WD bits), Bool)
-
-	issueCacheReady := io.dataOut_AXIS.port.ready
-
-	io.dataIn_AXIS.port.ready := issueCacheReady && getHeader
-	io.headerIn_AXIS.port.ready := issueCacheReady && !getHeader
-
-	bypassData.zipWithIndex.foreach { case (u, i) =>
-		u._1 := io.dataIn_AXIS.port.data(8 * (i + 1) - 1 downto 8 * i)
-		u._2 := io.dataIn_AXIS.port.keep(i)
-	}
-
-	when (io.dataIn_AXIS.port.fire) {
-		dataCache.zipWithIndex.foreach { case (u, i) =>
-			u._1 := io.dataIn_AXIS.port.data( 8 * (i + 1) - 1 downto 8 * i)
-			u._2 := io.dataIn_AXIS.port.keep(i)
-		}
-	} elsewhen (io.dataOut_AXIS.port.isLast) {
-		dataCache.foreach { u => u._1 := 0; u._2 := False }
-	} otherwise {
-		dataCache.foreach{ u => u._1 := u._1; u._2 := u._2}
-	}
-
-	val tmp = Array.concat(bypassData, dataCache)
-	val mappedData = Array.fill(config.DATA_BYTE_WD)(Bits(8 bits), Bool)
-	mappedData.zipWithIndex.foreach { case (u, idx) =>
-		switch(selectedMode) {
-			for (i <- 0 to config.DATA_BYTE_WD) {
-				is(i) {
-					u._1 := tmp(config.DATA_BYTE_WD - 1 - idx + i)._1
-					u._2 := tmp(config.DATA_BYTE_WD - 1 - idx + i)._2
-				}
-			}
-			default {
-				u._1 := B(0)
-				u._2 := False
+	def byteMaskData(byteMask : Bits, data : Bits): Bits = {
+		var dataWidth = data.getWidth / config.BYTE_WD
+		var maskWidth = byteMask.getWidth
+		require(maskWidth == dataWidth, s"ByteMaskData maskWidth${maskWidth} != dataWidth${dataWidth}")
+		val vecByte = data.subdivideIn(maskWidth slices)
+		vecByte.zipWithIndex.foreach { case (byte, idx) =>
+			when (byteMask(idx)) {
+				byte.clearAll()
 			}
 		}
+		val maskedData = vecByte.reverse.reduceLeft(_ ## _)
+		maskedData
 	}
 
-	val mappedHeader = Array.fill(config.DATA_BYTE_WD)(Bits(8 bits), Bool)
-	mappedHeader.zipWithIndex.foreach { case (u, idx) =>
-		switch(io.headerIn_AXIS.port.user.resize(config.BYTE_CNT_WD).asUInt) {
-			for (i <- 0 until config.DATA_BYTE_WD - idx) {
-				is (config.DATA_BYTE_WD - i) {
-					u._1 := io.headerIn_AXIS.port.data(8 * (config.DATA_BYTE_WD - idx - i) - 1 downto 8 * (config.DATA_BYTE_WD - 1 - idx - i))
-					u._2 := True
-				}
-				default {
-					u._1 := B(0)
-					u._2 := False
-				}
-			}
+	secondStage <-/< firstStage.translateWith(byteMaskData(~bypassMask, firstStage.payload) |
+																						byteMaskData(bypassMask, bypassPath.payload))
+
+	bypassPath.ready := secondStage.ready
+
+	def rotateRightByte(data : Bits, bias : UInt): Bits = {
+		var result = cloneOf(data)
+		result := data
+		for (i <- bias.bitsRange) {
+			result \= (bias(i) ? result.rotateRight(config.BYTE_WD << i) | result)
 		}
+		result
 	}
 
-	issueCache.zipWithIndex.foreach { case (u, idx) =>
-		when (!getHeader) {
-			when (mappedHeader(idx)._2) {
-				u := mappedHeader(idx)._1
-			} otherwise {
-				u := u
-			}
+	val commitStage = secondStage.clone()
+	commitStage <-/< secondStage.translateWith(rotateRightByte(secondStage.payload, rotateRightBits))
+
+	var delay : Int = 4
+	val delayReg = Vec(Bool() setAsReg() init False , delay)
+	val delayLoaded = Bool() setAsReg() init False
+	when(io.dataAxisOut.port.isLast) {
+		delayReg.foreach(reg => reg := False)
+		delayLoaded.clear()
+	} elsewhen (io.dataAxisIn.port.lastFire & io.dataAxisOut.port.ready & !delayLoaded) {
+		delayLoaded.set()
+		when (oneMoreCycle) {
+			delayReg(1) := True
 		} otherwise {
-			when (io.dataIn_AXIS.port.fire) {
-				when (mappedData(idx)._2 && issueCacheReady) {
-					u := mappedData(idx)._1
-				} otherwise {
-					u := u
-				}
-			} elsewhen (receiveComplete && issueCacheReady) {
-				u := mappedData(idx)._1
-			} otherwise {
-				u := u
-			}
+			delayReg(2) := True
+		}
+	} elsewhen (io.dataAxisIn.port.lastFire & !delayLoaded) {
+		delayLoaded.set()
+		when(oneMoreCycle) {
+			delayReg(0) := True
+		} otherwise {
+			delayReg(1) := True
+		}
+	} elsewhen (receiveComplete && io.dataAxisOut.port.ready & delayLoaded) {
+		for (i <- 1 until delay) {
+			delayReg(i) := delayReg(i - 1)
 		}
 	}
 
 
-	val issueCacheLoaded = Bool() setAsReg() init False
-	val combineData= issueCache.reduce(_ ## _)
+	val lastKeep = Bits(config.DATA_BYTE_WD bits) setAsReg() init 0
 
-	when (io.dataIn_AXIS.port.fire) {
-		issueCacheLoaded := True
-	} elsewhen (io.dataOut_AXIS.port.isLast) {
-		issueCacheLoaded := False
-	} elsewhen (receiveComplete && issueCacheReady) {
-		issueCacheLoaded := True
-	} elsewhen (issueCacheLoaded && issueCacheReady) {
-		issueCacheLoaded := False
-	} otherwise {
-		issueCacheLoaded := issueCacheLoaded
+	def rotateRightNoWarning(data : Bits, bias: UInt): Bits = {
+		var result = cloneOf(data)
+		result := data
+		for (i <- bias.bitsRange) {
+			result \= (bias(i) ? result.rotateRight(1 << i) | result)
+		}
+		result
 	}
-	io.dataOut_AXIS.port.valid := issueCacheLoaded
-	io.dataOut_AXIS.port.data := combineData
+	when (receiveComplete & io.dataAxisOut.port.ready) {
+		when (oneMoreCycle) {
+			lastKeep := ((headerKeep ## dataKeep) rotateRight rotateRightBits)(2 * config.DATA_BYTE_WD - 1 downto config.DATA_BYTE_WD)
+		} otherwise {
+			lastKeep := ((headerKeep ## dataKeep) >> rotateRightBits).resized
+		}
+	} otherwise {
+		lastKeep := lastKeep
+	}
 
-	when (receiveComplete && io.dataOut_AXIS.port.ready && delayCnt === delayCycle) {
-		io.dataOut_AXIS.port.last := True
-		io.dataOut_AXIS.port.keep := lastKeep
+	io.dataAxisOut.port.valid := commitStage.valid
+	io.dataAxisOut.port.data := commitStage.payload
+
+	when(receiveComplete && io.dataAxisOut.port.ready && delayReg(delay-1)) {
+		io.dataAxisOut.port.last := True
+		io.dataAxisOut.port.keep := lastKeep
 	} otherwise {
-		io.dataOut_AXIS.port.last := False
-		io.dataOut_AXIS.port.keep := Bits (config.DATA_BYTE_WD bits) setAllTo True
+		io.dataAxisOut.port.last := False
+		io.dataAxisOut.port.keep := Bits(config.DATA_BYTE_WD bits) setAllTo True
 	}
+
+	commitStage.ready := io.dataAxisOut.port.ready
 }

@@ -9,6 +9,7 @@ object AXI4StreamInsertTopLevelVerilog {
 		val config = MergeGenerics(
 			DATA_WD = 32,
 			DATA_BYTE_WD = 32 / 8,
+			BYTE_WD = 8,
 			BYTE_CNT_WD = 3
 		)
 

@@ -17,6 +17,7 @@ object Sim extends App {
 	val config = MergeGenerics(
 		DATA_WD = 32,
 		DATA_BYTE_WD = 32 / 8,
+		BYTE_WD = 8,
 		BYTE_CNT_WD = 3
 	)
 
@@ -43,19 +44,19 @@ object Sim extends App {
 		.compile(new AXI4StreamInsertTopLevel(config))
 		.doSim { dut =>
 			dut.clockDomain.forkStimulus(period = 10)
-			SimTimeout(500000)
+			SimTimeout(50000)
 			def driverInit(): Unit ={
-				dut.io.headerIn_AXIS.port.user #= 0
-				dut.io.headerIn_AXIS.port.keep #= 0
-				dut.io.headerIn_AXIS.port.data #= 0
-				dut.io.headerIn_AXIS.port.valid #= false
+				dut.io.headerAxisIn.port.user #= 0
+				dut.io.headerAxisIn.port.keep #= 0
+				dut.io.headerAxisIn.port.data #= 0
+				dut.io.headerAxisIn.port.valid #= false
 
-				dut.io.dataIn_AXIS.port.keep #= 0
-				dut.io.dataIn_AXIS.port.data #= 0
-				dut.io.dataIn_AXIS.port.valid #= false
-				dut.io.dataIn_AXIS.port.last #= false
+				dut.io.dataAxisIn.port.keep #= 0
+				dut.io.dataAxisIn.port.data #= 0
+				dut.io.dataAxisIn.port.valid #= false
+				dut.io.dataAxisIn.port.last #= false
 
-				dut.io.dataOut_AXIS.port.ready #= true
+				dut.io.dataAxisOut.port.ready #= true
 			}
 
 			val scoreboard = ScoreboardInOrder[Int]()
@@ -79,9 +80,9 @@ object Sim extends App {
 			def DataDrive(): Unit ={
 				fork {
 					def PushDataInScoreBoard(): Unit ={
-						if (dut.io.dataIn_AXIS.port.valid.toBoolean && dut.io.dataIn_AXIS.port.ready.toBoolean) {
-							var data: BigInt = dut.io.dataIn_AXIS.port.data.toBigInt
-							var keep: BigInt = dut.io.dataIn_AXIS.port.keep.toBigInt
+						if (dut.io.dataAxisIn.port.valid.toBoolean && dut.io.dataAxisIn.port.ready.toBoolean) {
+							var data: BigInt = dut.io.dataAxisIn.port.data.toBigInt
+							var keep: BigInt = dut.io.dataAxisIn.port.keep.toBigInt
 //															println(data.toString(16) + "  --  " + keep.toString(2))
 							for (i <- config.DATA_BYTE_WD - 1 downto 0) {
 								if ((pow(2, i).toInt & keep) >> i == 1) {
@@ -95,29 +96,29 @@ object Sim extends App {
 					def issueSeq(t: Int): Unit = {
 						var times = 0
 						while (times < t) {
-							if (dut.io.dataIn_AXIS.port.ready.toBoolean) {
-								dut.io.dataIn_AXIS.port.data.randomize()
+							if (dut.io.dataAxisIn.port.ready.toBoolean) {
+								dut.io.dataAxisIn.port.data.randomize()
 								times += 1
 							}
-							dut.io.dataIn_AXIS.port.valid #= true
-							dut.io.dataIn_AXIS.port.keep #= pow(2, config.DATA_BYTE_WD).toInt - 1
-							dut.io.dataIn_AXIS.port.last #= false
+							dut.io.dataAxisIn.port.valid #= true
+							dut.io.dataAxisIn.port.keep #= pow(2, config.DATA_BYTE_WD).toInt - 1
+							dut.io.dataAxisIn.port.last #= false
 							dut.clockDomain.waitRisingEdge()
 							PushDataInScoreBoard()
-							dut.io.dataIn_AXIS.port.valid #= false
+							dut.io.dataAxisIn.port.valid #= false
 						}
-						dut.io.dataIn_AXIS.port.data.randomize()
-						dut.io.dataIn_AXIS.port.valid #= true
-						dut.io.dataIn_AXIS.port.last #= true
-						dut.io.dataIn_AXIS.port.keep #= SumUpPow(Random.nextInt(config.DATA_BYTE_WD) + 1)
+						dut.io.dataAxisIn.port.data.randomize()
+						dut.io.dataAxisIn.port.valid #= true
+						dut.io.dataAxisIn.port.last #= true
+						dut.io.dataAxisIn.port.keep #= SumUpPow(Random.nextInt(config.DATA_BYTE_WD) + 1)
 						dut.clockDomain.waitRisingEdge()
-						while (!dut.io.dataIn_AXIS.port.ready.toBoolean) {
+						while (!dut.io.dataAxisIn.port.ready.toBoolean) {
 							dut.clockDomain.waitRisingEdge()
 						}
-						dut.io.dataIn_AXIS.port.data #= 0
-						dut.io.dataIn_AXIS.port.valid #= false
-						dut.io.dataIn_AXIS.port.last #= false
-						dut.io.dataIn_AXIS.port.keep #= pow(2, config.DATA_BYTE_WD).toInt - 1
+						dut.io.dataAxisIn.port.data #= 0
+						dut.io.dataAxisIn.port.valid #= false
+						dut.io.dataAxisIn.port.last #= false
+						dut.io.dataAxisIn.port.keep #= pow(2, config.DATA_BYTE_WD).toInt - 1
 						PushDataInScoreBoard()
 
 						dut.clockDomain.waitRisingEdge(10)
@@ -138,16 +139,16 @@ object Sim extends App {
 				fork {
 					def SetHeader(): Unit = {
 						var t = Random.nextInt(config.DATA_BYTE_WD + 1)
-						dut.io.headerIn_AXIS.port.data.randomize()
-						dut.io.headerIn_AXIS.port.valid #= true
-						dut.io.headerIn_AXIS.port.keep #= SumDownPow(t)
-						dut.io.headerIn_AXIS.port.user #= t
+						dut.io.headerAxisIn.port.data.randomize()
+						dut.io.headerAxisIn.port.valid #= true
+						dut.io.headerAxisIn.port.keep #= SumDownPow(t)
+						dut.io.headerAxisIn.port.user #= t
 					}
 
 					def PushHeaderInScoreBoard(): Unit ={
-						if (dut.io.headerIn_AXIS.port.valid.toBoolean && dut.io.headerIn_AXIS.port.ready.toBoolean) {
-							var data: BigInt = dut.io.headerIn_AXIS.port.data.toBigInt
-							var keep: BigInt = dut.io.headerIn_AXIS.port.keep.toBigInt
+						if (dut.io.headerAxisIn.port.valid.toBoolean && dut.io.headerAxisIn.port.ready.toBoolean) {
+							var data: BigInt = dut.io.headerAxisIn.port.data.toBigInt
+							var keep: BigInt = dut.io.headerAxisIn.port.keep.toBigInt
 							//								println(data.toString(16) + "  --  " + keep.toString(2))
 							for (i <- config.DATA_BYTE_WD - 1 downto 0) {
 								if ((pow(2, i).toInt & keep) >> i == 1) {
@@ -159,10 +160,10 @@ object Sim extends App {
 					}
 
 					def ResetHeader(): Unit = {
-						dut.io.headerIn_AXIS.port.data #= 0
-						dut.io.headerIn_AXIS.port.valid #= false
-						dut.io.headerIn_AXIS.port.keep #= 0
-						dut.io.headerIn_AXIS.port.user #= 0
+						dut.io.headerAxisIn.port.data #= 0
+						dut.io.headerAxisIn.port.valid #= false
+						dut.io.headerAxisIn.port.keep #= 0
+						dut.io.headerAxisIn.port.user #= 0
 					}
 
 					while (true) {
@@ -172,7 +173,7 @@ object Sim extends App {
 							PushHeaderInScoreBoard()
 							ResetHeader()
 						}
-						dut.clockDomain.waitRisingEdge()
+						dut.clockDomain.waitRisingEdge(Random.nextInt(10))
 					}
 				}
 			}
@@ -181,9 +182,9 @@ object Sim extends App {
 				fork {
 					while (true) {
 						if (Random.nextFloat() < 0.05f) {
-							dut.io.dataOut_AXIS.port.ready #= false
-							dut.clockDomain.waitRisingEdge(Random.nextInt(4))
-							dut.io.dataOut_AXIS.port.ready #= true
+							dut.io.dataAxisOut.port.ready #= false
+							dut.clockDomain.waitRisingEdge(Random.nextInt(5))
+							dut.io.dataAxisOut.port.ready #= true
 						}
 						dut.clockDomain.waitRisingEdge()
 					}
@@ -193,9 +194,9 @@ object Sim extends App {
 			def Monitor(): Unit ={
 				fork {
 					while (true) {
-						if (dut.io.dataOut_AXIS.port.valid.toBoolean && dut.io.dataOut_AXIS.port.ready.toBoolean) {
-							var data: BigInt = dut.io.dataOut_AXIS.port.data.toBigInt
-							var keep: BigInt = dut.io.dataOut_AXIS.port.keep.toBigInt
+						if (dut.io.dataAxisOut.port.valid.toBoolean && dut.io.dataAxisOut.port.ready.toBoolean) {
+							var data: BigInt = dut.io.dataAxisOut.port.data.toBigInt
+							var keep: BigInt = dut.io.dataAxisOut.port.keep.toBigInt
 //							println(data.toString(16) + "  --  " + keep.toString(2))
 							for (i <- config.DATA_BYTE_WD - 1 downto 0) {
 								if ((pow(2, i).toInt & keep) >> i == 1) {
@@ -213,7 +214,7 @@ object Sim extends App {
 			dut.clockDomain.waitRisingEdge(50)
 			DataDrive()
 			HeaderDrive()
-			RandomReady()
+//			RandomReady()
 			Monitor()
 
 
