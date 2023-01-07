@@ -6,10 +6,12 @@ val spinalCore = "com.github.spinalhdl" %% "spinalhdl-core" % spinalVersion
 val spinalLib = "com.github.spinalhdl" %% "spinalhdl-lib" % spinalVersion
 val spinalIdslPlugin = compilerPlugin("com.github.spinalhdl" %% "spinalhdl-idsl-plugin" % spinalVersion)
 
+addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.10.4")
 lazy val template = (project in file("."))
   .settings(
     name := "test",
     libraryDependencies ++= Seq(spinalCore, spinalLib, spinalIdslPlugin)
   )
+
 
 fork := true

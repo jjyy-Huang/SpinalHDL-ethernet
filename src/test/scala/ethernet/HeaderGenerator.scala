@@ -45,7 +45,7 @@ object HeaderGeneratorSim extends App {
         dut.io.metaIn.payload.srcPort #= 0
         dut.io.metaIn.packetLen #= 0
         dut.io.metaIn.valid #= false
-        dut.io.metaIn.mtu #= MTUEnum.mtu1024
+        dut.io.metaIn.mtu #= PacketMTUEnum.mtu1024
         dut.io.headerOut.ready #= true
       }
       initPort()

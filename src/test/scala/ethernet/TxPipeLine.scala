@@ -11,7 +11,6 @@ import scala.math._
 import scala.util
 import scala.util.Random
 
-
 object TxControlUnitSim extends App {
 
   val txConfig = TxGenerics()
@@ -28,20 +27,22 @@ object TxControlUnitSim extends App {
       "xil_defaultlib.glbl "
     ),
     runFlags = List(
-
     )
   )
 
   SimConfig
     .withVCS(flags)
-    .withVCSSimSetup("/home/jerry/workspace/hdl/prj/test/synopsys_sim.setup", null)
+    .withVCSSimSetup(
+      "/home/jerry/workspace/hdl/prj/test/synopsys_sim.setup",
+      null
+    )
     .withFSDBWave
     .compile(new TxControlUnit(txConfig))
     .doSim { dut =>
       dut.clockDomain.forkStimulus(period = 10)
 
       def initPort(): Unit = {
-        dut.io.headerType #= HeaderProtocolEnum.none
+        dut.io.headerType #= ProtocolTypeEnum.none
         dut.io.headerGeneratorFinish #= false
         dut.io.packetLen #= 0
         dut.io.dataValid #= false
@@ -55,7 +56,7 @@ object TxControlUnitSim extends App {
       dut.clockDomain.waitRisingEdge(50)
 
       def loadData(): Unit = {
-        dut.io.headerType #= HeaderProtocolEnum.udp
+        dut.io.headerType #= ProtocolTypeEnum.udp
         dut.io.packetLen #= 32 * 2 + 1
         dut.io.dataValid #= true
         dut.io.headerGeneratorFinish #= true
@@ -76,12 +77,11 @@ object TxControlUnitSim extends App {
     }
 }
 
-
-case class simConfig (
-                       packetLen : Int = 256,
-                       dstIpAddr : String = "c0a80103",
-                       dstPort : String = "156"
-                     )
+case class simConfig(
+    packetLen: Int = 258,
+    dstIpAddr: String = "c0a80103",
+    dstPort: String = "156"
+)
 object TxPipeLineSim extends App {
 
   val txConfig = TxGenerics()
@@ -101,13 +101,15 @@ object TxPipeLineSim extends App {
       "xil_defaultlib.glbl "
     ),
     runFlags = List(
-
     )
   )
 
   SimConfig
     .withVCS(flags)
-    .withVCSSimSetup("/home/jerry/workspace/hdl/prj/test/synopsys_sim.setup", null)
+    .withVCSSimSetup(
+      "/home/jerry/workspace/hdl/prj/test/synopsys_sim.setup",
+      null
+    )
     .withFSDBWave
 //    .withIVerilog
 //    .withWave
@@ -121,7 +123,7 @@ object TxPipeLineSim extends App {
         dut.io.metaIn.payload.srcPort #= 0
         dut.io.metaIn.packetLen #= 0
         dut.io.metaIn.valid #= false
-        dut.io.metaIn.mtu #= MTUEnum.mtu1024
+        dut.io.metaIn.mtu #= PacketMTUEnum.mtu1024
         dut.io.dataAxisOut.ready #= true
 
         dut.io.dataAxisIn.valid #= false
@@ -135,23 +137,23 @@ object TxPipeLineSim extends App {
 
       dut.clockDomain.waitRisingEdge(50)
 
-
+//      StreamReadyRandomizer(dut.io.dataAxisOut, dut.clockDomain)
       driveTransaction()
       driveTransaction()
 
-      def driveTransaction(): Unit ={
-        fork {
+      def driveTransaction(): Unit = {
+        val a = fork {
           dut.clockDomain.waitRisingEdge(Random.nextInt(10).abs)
           loadMeta()
         }
-        fork {
+        val b = fork {
           dut.clockDomain.waitRisingEdge(Random.nextInt(10).abs)
           loadData()
         }
-        forkJoin()
+        a.join()
+        b.join()
         dut.clockDomain.waitRisingEdge(Random.nextInt(50).abs)
       }
-
 
       def loadMeta(): Unit = {
         dut.io.metaIn.payload.dstIpAddr #= simCfg.dstIpAddr.asHex
@@ -163,15 +165,20 @@ object TxPipeLineSim extends App {
       }
 
       def loadData(): Unit = {
-        for (i <- 0 until (simCfg.packetLen.toFloat/32).ceil.toInt) {
+        for (i <- 0 until (simCfg.packetLen.toFloat / 32).ceil.toInt) {
           dut.io.dataAxisIn.data #= "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20".asHex
           dut.io.dataAxisIn.valid #= true
-          if (i - 1 == (simCfg.packetLen.toFloat/32).ceil.toInt) {
+          if (i == (simCfg.packetLen.toFloat / 32.0).ceil.toInt - 1) {
+            dut.io.dataAxisIn.keep #= (pow(2, simCfg.packetLen - i * 32) - 1).toLong.abs
             dut.io.dataAxisIn.last #= true
+          } else {
+            dut.io.dataAxisIn.last #= false
+            dut.io.dataAxisIn.keep #= (pow(2, 32) - 1).toLong.abs
           }
           dut.clockDomain.waitRisingEdge()
           dut.io.dataAxisIn.valid #= false
           dut.io.dataAxisIn.last #= false
+          dut.io.dataAxisIn.keep #= 0
         }
 
       }
@@ -190,6 +197,7 @@ object TxPipeLineSim extends App {
         dut.clockDomain.waitRisingEdge()
         dut.headerGenerator.arpCache.io.writeEna #= false
       }
+
 
       dut.clockDomain.waitRisingEdge(50)
       simSuccess()
