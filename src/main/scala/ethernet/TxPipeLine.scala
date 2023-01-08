@@ -7,6 +7,7 @@ import spinal.lib.bus.amba4.axis._
 import spinal.core.Mem
 import ethernet.PacketMTUEnum
 import spinal.core.internals.Operator
+import spinal.lib.bus.amba4.axis.Axi4Stream.Axi4StreamBundle
 import spinal.lib.fsm._
 
 import java.util.Calendar
@@ -19,10 +20,10 @@ case class TxGenerics(
     DATA_BYTE_CNT: Int = 32,
     OCTETS: Int = 8,
     DATA_USE_TLAST: Boolean = true,
-    DATA_USE_TUSER: Boolean = false,
+    DATA_USE_TUSER: Boolean = true,
     DATA_USE_TKEEP: Boolean = true,
     DATA_USE_TSTRB: Boolean = false,
-    DATA_TUSER_WIDTH: Int = 0,
+    DATA_TUSER_WIDTH: Int = 1,
     INPUT_BUFFER_DEPTH: Int = 256
 )
 
@@ -140,11 +141,12 @@ case class TxGenerics(
 //  }
 //}
 
-object StreamJoinSelect {
+object Axi4StreamConditionalJoin {
 
   /** Convert a tuple of streams into a stream of tuples
+    *  source stream1 has higher priority
     */
-  def apply[T1 <: Data, T2 <: Data](
+  def apply[T1 <: Axi4StreamBundle, T2 <: Axi4StreamBundle](
       source1: Stream[T1],
       source2: Stream[T2],
       source1Select: Bool,
@@ -158,11 +160,18 @@ object StreamJoinSelect {
       )
     )
     combined.valid := (sources(0).valid && sources(1).valid) |
-                        ((source1Select) && sources(0).valid)
+      ((source1Select) && sources(0).valid)
     sources(0).ready := combined.fire
     sources(1).ready := source2Select & combined.fire
-    combined.payload._1 := source1.payload
-    combined.payload._2 := source2.payload
+//    if (useKeep/useLast/useUser)
+    combined.payload._1.keep := source1.fire ? source1.payload.keep | 0
+    combined.payload._2.keep := source2.fire ? source2.payload.keep | 0
+    combined.payload._1.user := source1.fire ? source1.payload.user | 0
+    combined.payload._2.user := source2.fire ? source2.payload.user | 0
+    combined.payload._1.data := source1.fire ? source1.payload.data | 0
+    combined.payload._2.data := source2.fire ? source2.payload.data | 0
+    combined.payload._1.last := source1.fire ? source1.payload.last | False
+    combined.payload._2.last := source2.fire ? source2.payload.last | False
     combined
   }
 }
@@ -192,13 +201,10 @@ class TxTop(
   val dataBuffered = io.dataAxisIn.queue(txConfig.INPUT_BUFFER_DEPTH)
   val metaBuffered = io.metaIn.queue(headerConfig.INPUT_BUFFER_DEPTH)
 
-  val arpCache = new ARPCache(arpCacheConfig)
-
   val headerGenerator =
-    new HeaderGenerator(headerConfig, arpCacheConfig, metaInterfaceConfig)
+    new HeaderGenerator(headerConfig, metaInterfaceConfig)
   headerGenerator.io.metaIn << metaBuffered
-  arpCache.io.port <> headerGenerator.io.arpCacheRW
-  val headerBuffered = headerGenerator.io.headerAxisOut.queue(6)
+  val headerBuffered= headerGenerator.io.headerAxisOut.queue(16)
   val forkedStream = StreamFork(dataBuffered, 2)
 
   val dataBufferedReg = forkedStream(0).stage()
@@ -207,23 +213,36 @@ class TxTop(
   val streamJoinReg0 = Reg(Bool()) init False
   val streamJoinReg1 = Reg(Bool()) init False
 
+  val invalidData = Bool()
+
+  val selectedStream =
+    StreamMux(streamMuxReg, Vec(headerBuffered, dataBufferedReg)) s2mPipe () throwWhen(invalidData)
+
+
+  val joinedStream = Axi4StreamConditionalJoin(
+    selectedStream,
+    forkedStream(1),
+    streamJoinReg0,
+    streamJoinReg1
+  ) m2sPipe ()
+
+  when(forkedStream(1).lastFire) {
+    streamJoinReg1 := False
+  } elsewhen (selectedStream.fire & !streamMuxReg.asBool) {
+    streamJoinReg1 := True
+  }
+
   when(headerBuffered.lastFire) {
     streamMuxReg := 1
   } elsewhen (dataBufferedReg.lastFire) {
     streamMuxReg := 0
   }
 
-  when(selectedStream.fire) {
-    streamJoinReg1 := True
-  } elsewhen(forkedStream(1).lastFire) {
-    streamJoinReg1 := False
+  when(forkedStream(1).lastFire) {
+    streamJoinReg0 := True
+  } elsewhen (selectedStream.lastFire) {
+    streamJoinReg0 := False
   }
-
-  val selectedStream =
-    StreamMux(streamMuxReg, Vec(headerBuffered, dataBufferedReg)) s2mPipe ()
-
-  val joinedStream = StreamJoinSelect(selectedStream, forkedStream(1), streamJoinReg0, streamJoinReg1) m2sPipe()
-
 
   //  redesign
   def rotateLeftByte(data: Bits, bias: UInt): Bits = {
@@ -238,37 +257,103 @@ class TxTop(
     }
     result
   }
+
+  def rotateLeftBit(data: Bits, bias: UInt): Bits = {
+    val result = cloneOf(data)
+    val bitWidth = data.getWidth
+    switch(bias) {
+      for (idx <- 0 until bitWidth) {
+        is(idx) {
+          result := data.takeLow(bitWidth - idx) ## data.takeHigh(idx)
+        }
+      }
+    }
+    result
+  }
   def byteMaskData(byteMask: Bits, data: Bits): Bits = {
     val dataWidth = txConfig.DATA_BYTE_CNT
-    println(dataWidth)
     val maskWidth = byteMask.getWidth
-    println(maskWidth)
+    val sliceWidth = data.getWidth / dataWidth
     require(
       maskWidth == dataWidth,
       s"ByteMaskData maskWidth${maskWidth} != dataWidth${dataWidth}"
     )
     val spiltAsSlices = data.subdivideIn(maskWidth slices)
     val arrMaskedByte = Array.tabulate(spiltAsSlices.length) { idx =>
-      byteMask(idx) ? B(0, 8 bits) | spiltAsSlices(idx)
+      byteMask(idx) ? B(0, sliceWidth bits) | spiltAsSlices(idx)
     }
     val maskedData = arrMaskedByte.reverse.reduceLeft(_ ## _)
     maskedData
   }
 
-  val maskStage = joinedStream.translateWith(joinedStream.payload) combStage()
-  val shiftStage = maskStage.translateWith(maskStage.payload) m2sPipe()
+  def generateByteMask(len: UInt): Bits = {
+    val res = Bits(txConfig.DATA_BYTE_CNT bits)
+    switch(len) {
+      for (idx <- 0 until txConfig.DATA_BYTE_CNT) {
+        if (idx == 0) {
+          is(idx) {
+            res := Bits(txConfig.DATA_BYTE_CNT bits).setAll()
+          }
+        } else {
+          is(idx) {
+            res := B(
+              txConfig.DATA_BYTE_CNT bits,
+              (txConfig.DATA_BYTE_CNT - 1 downto txConfig.DATA_BYTE_CNT - idx) -> true,
+              default -> false
+            )
+          }
+        }
+      }
+    }
+    res
+  }
 
-  io.dataAxisOut << shiftStage.payload
+  val mask = Reg(Bits(txConfig.DATA_BYTE_CNT bits)) init 0
+  val shiftLen = Reg(UInt(log2Up(txConfig.DATA_BYTE_CNT) bits)) init 0
+  val packetLen = selectedStream.user(19 downto 14).asUInt
 
-  //  val rotateShiftStage = bufferStage.translateWith(
-  //    byteMaskData(bypassMask, bufferStage.payload) |
-  //      byteMaskData(~bypassMask, bypassData)
-  //  ) m2sPipe()
-  //
-  //  val commitStage = rotateShiftStage.translateWith(
-  //    rotateLeftByte(rotateShiftStage.payload, txControlUnit.io.rotateShiftLen)
-  //  ) m2sPipe()
-  //
-  //  io.dataAxisOut <-< Axi4Stream(commitStage)
+  val maskStage = dataBufferedReg.clone()
+  val cntTrigger = selectedStream.fire && (selectedStream.user.takeLow(8) === B"8'xA5") && (selectedStream.user
+    .takeHigh(8) === B"8'x5A") && selectedStream.user(13)
+
+  when(selectedStream.fire) {
+    when(
+      (selectedStream.user.takeLow(8) === B"8'xA5") && (selectedStream.user
+        .takeHigh(8) === B"8'x5A")
+    ) {
+      mask := generateByteMask(selectedStream.user(12 downto 8).asUInt)
+      shiftLen := selectedStream.user(12 downto 8).asUInt
+    }
+  }
+
+  val transactionCounter = new StreamTransactionCounter(6)
+  transactionCounter.io.ctrlFire := cntTrigger
+  transactionCounter.io.targetFire := maskStage.fire
+  transactionCounter.io.count := packetLen
+
+  invalidData := transactionCounter.io.done & streamJoinReg0
+
+
+  maskStage.arbitrationFrom(joinedStream)
+  maskStage.data := byteMaskData(
+    ~mask,
+    joinedStream.payload._1.data
+  ) | byteMaskData(mask, joinedStream.payload._2.data)
+  maskStage.keep := byteMaskData(
+    ~mask,
+    joinedStream.payload._1.keep
+  ) | byteMaskData(mask, joinedStream.payload._2.keep)
+  maskStage.user := 0
+  maskStage.last := transactionCounter.io.last
+
+
+  val shiftStage = maskStage.clone()
+  shiftStage.arbitrationFrom(maskStage)
+  shiftStage.data := rotateLeftByte(maskStage.data, shiftLen)
+  shiftStage.keep := rotateLeftBit(maskStage.keep, shiftLen)
+  shiftStage.user := 0
+  shiftStage.last := maskStage.last
+
+  io.dataAxisOut <-< shiftStage
 
 }

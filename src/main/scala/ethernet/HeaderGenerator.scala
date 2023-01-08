@@ -2,10 +2,12 @@ package ethernet
 import spinal.core._
 import spinal.core.internals.Operator
 import spinal.core.sim._
+import spinal.lib
 import spinal.lib._
 import spinal.lib.bus.amba4.axis.{Axi4Stream, Axi4StreamConfig}
 import spinal.lib.fsm._
 
+import scala.collection.mutable
 import scala.math.pow
 
 case class HeaderGeneratorGenerics(
@@ -26,7 +28,7 @@ case class HeaderGeneratorGenerics(
     DATA_USE_TUSER: Boolean = true,
     DATA_USE_TKEEP: Boolean = true,
     DATA_USE_TSTRB: Boolean = false,
-    DATA_TUSER_WIDTH: Int = 32,
+    DATA_TUSER_WIDTH: Int = 1,
     INPUT_BUFFER_DEPTH: Int = 4
 )
 case class MetaInterfaceGenerics(
@@ -36,8 +38,10 @@ case class MetaInterfaceGenerics(
     MAC_ADDR_WIDTH: Int = 48
 )
 
-case class MetaInterface(config: MetaInterfaceGenerics) extends Bundle with IMasterSlave {
-  val packetLen = UInt(config.PACKET_LEN_WIDTH bits)
+case class MetaInterface(config: MetaInterfaceGenerics)
+    extends Bundle
+    with IMasterSlave {
+  val dataLen = UInt(config.PACKET_LEN_WIDTH bits)
   val dstMacAddr = Bits(config.MAC_ADDR_WIDTH bits)
   val dstIpAddr = Bits(config.IP_ADDR_WIDTH bits)
   val dstPort = Bits(config.PORT_WIDTH bits)
@@ -45,27 +49,28 @@ case class MetaInterface(config: MetaInterfaceGenerics) extends Bundle with IMas
   val packetMTU = PacketMTUEnum()
 
   override def asMaster(): Unit = {
-    out(packetLen, dstMacAddr, dstIpAddr, dstPort, srcPort, packetMTU)
+    out(dataLen, dstMacAddr, dstIpAddr, dstPort, srcPort, packetMTU)
   }
 }
 
-case class EthernetProtocolHeaderConstructor(initField: Map[String, Int])
-    extends Bundle {
+case class EthernetProtocolHeaderConstructor(
+    initField: mutable.LinkedHashMap[String, Int]
+) extends Bundle {
   def constructHeader(): Array[Bits] = {
     val fieldName: Array[String] = initField.keys.toArray
     val fieldWidth: Array[Int] = initField.values.toArray
-    val protocolField = Array.tabulate[Bits](initField.size) { index =>
+    val protocolField = List.tabulate[Bits](initField.size) { index =>
       val tmp: Bits =
         Bits(fieldWidth(index) bits) setName fieldName(index)
       tmp
     }
-    protocolField
+    protocolField.toArray
   }
 
 }
 // interface workshop
 trait FrameHeader {
-  val frameFieldInit: Map[String, Int]
+  val frameFieldInit: mutable.LinkedHashMap[String, Int]
   val header: Array[Bits]
 }
 
@@ -86,7 +91,7 @@ object EthernetHeader {
 
 // data strcuture
 case class EthernetHeader() extends Bundle with FrameHeader {
-  val frameFieldInit = Map(
+  val frameFieldInit = mutable.LinkedHashMap(
     "dstMAC" -> 6 * 8,
     "srcMAC" -> 6 * 8,
     "ethType" -> 2 * 8
@@ -110,7 +115,7 @@ object IPv4Header {
 }
 
 case class IPv4Header() extends Bundle with FrameHeader {
-  val frameFieldInit = Map(
+  val frameFieldInit = mutable.LinkedHashMap(
     "protocolVersion" -> 4,
     "internetHeaderLength" -> 4,
     "differentiatedServicesCodePoint" -> 6,
@@ -121,7 +126,7 @@ case class IPv4Header() extends Bundle with FrameHeader {
     "fragmentOffset" -> 13,
     "ttl" -> 8,
     "protocol" -> 8,
-    "checksum" -> 2 * 8,
+    "ipChecksum" -> 2 * 8,
     "srcAddr" -> 4 * 8,
     "dstAddr" -> 4 * 8
   )
@@ -144,11 +149,11 @@ object UDPHeader {
 }
 
 case class UDPHeader() extends Bundle with FrameHeader {
-  val frameFieldInit = Map(
+  val frameFieldInit = mutable.LinkedHashMap(
     "srcPort" -> 2 * 8,
     "dstPort" -> 2 * 8,
     "len" -> 2 * 8,
-    "checksum" -> 2 * 8
+    "udpChecksum" -> 2 * 8
   )
   val header: Array[Bits] =
     EthernetProtocolHeaderConstructor(frameFieldInit).constructHeader()
@@ -169,7 +174,7 @@ object ARPHeader {
 }
 
 case class ARPHeader() extends FrameHeader {
-  val frameFieldInit = Map(
+  val frameFieldInit = mutable.LinkedHashMap(
     "hardwareType" -> 2 * 8,
     "protocolType" -> 2 * 8,
     "hardwareLen" -> 8,
@@ -184,46 +189,9 @@ case class ARPHeader() extends FrameHeader {
     EthernetProtocolHeaderConstructor(frameFieldInit).constructHeader()
 }
 
-object HeaderGenerator {
-  def getHeaderWidth(header: Seq[Array[Bits]]): Int = {
-    var len: Int = 0
-    header.foreach { protocol =>
-      protocol.foreach { data =>
-        len += data.getBitsWidth
-      }
-    }
-    len
-  }
-  def mergeHeader(header: Seq[Array[Bits]]): Vec[Bits] = {
-    var offset: Int = 0
-    val headerWidth: Int = getHeaderWidth(header)
-    var width: Int = 0
-
-    val tmp = header.flatten
-      .reduce(_ ## _)
-      .subdivideIn(8 bits)
-      .reduce(_ ## _)
-      .subdivideIn(256 bits)
-
-    tmp
-  }
-
-  def generate(protocol: String, headers: Seq[Array[Bits]]): Vec[Bits] = {
-    protocol match {
-      case "UDP" =>
-        val header = mergeHeader(headers)
-        header
-      case "ARP" =>
-        val header = mergeHeader(headers)
-        header
-
-    }
-  }
-}
-
 class HeaderGenerator(
     HeaderGeneratorConfig: HeaderGeneratorGenerics,
-    arpCacheConfig: ArpCacheGenerics,
+//    arpCacheConfig: ArpCacheGenerics,
     MetaConfig: MetaInterfaceGenerics
 ) extends Component {
   val headerAxisOutConfig = Axi4StreamConfig(
@@ -234,164 +202,223 @@ class HeaderGenerator(
     useUser = HeaderGeneratorConfig.DATA_USE_TUSER
   )
   val io = new Bundle {
-    val metaIn = slave Stream (MetaInterface(
-      MetaConfig
-    )) continueWhen (headerGeneratorState.stateReg === headerGeneratorState.IDLE)
-
-    val arpCacheRW = master(ARPCacheInterface(arpCacheConfig))
-    val arpReply = slave Stream (ARPCacheReplyInterface(arpCacheConfig))
+    val metaIn = slave Stream MetaInterface(MetaConfig)
 
     val headerAxisOut = master(Axi4Stream(headerAxisOutConfig))
   }
-  val metaRegs = RegNextWhen(io.metaIn.payload, io.metaIn.fire)
-  val ipLen = Reg(UInt(io.metaIn.payload.packetLen.getWidth bits)) init 0
-  val udpLen = Reg(UInt(io.metaIn.payload.packetLen.getWidth bits)) init 0
-  val ipId = Reg(UInt(16 bits)) init 0
+  val ipLenReg = Reg(UInt(16 bits)) init 0
+  val udpLenReg = Reg(UInt(16 bits)) init 0
+  val ipIdReg = Reg(UInt(16 bits)) init 0
+  val ipFragmentOffset = Reg(UInt(13 bits)) init 0
+  val ipChecksumReg = Reg(UInt(16 bits)) init 0
+  val udpChecksumReg = Reg(UInt(16 bits)) init 0
+  val generateDone = Bool()
+  val ipFlags = Bits(3 bits)
 
-  //  val needFragment = Reg(Bool()) init False
-  //  val cnt = Counter(32)
+  val packetLenMax = ((1500+14) / HeaderGeneratorConfig.DATA_BYTE_CNT.toFloat).ceil.toInt
+  val packetLen = Reg(UInt(log2Up(packetLenMax) bits)) init 0
+  println(log2Up(packetLenMax))
 
-  val headerGeneratorState = new StateMachine {
-    val sendingCycle = Reg(UInt(4 bits)) init 2
-    val sendingCnt = Counter(6)
-    val IDLE: State = new State with EntryPoint {
-      onEntry {
-        io.headerAxisOut.last := False
-      }
-      whenIsActive {
-        when(io.metaIn.fire) {
-          goto(GET_MAC)
-        }
-      }
-      onExit {
-        ipLen := metaRegs.packetLen + 28
-        udpLen := metaRegs.packetLen + 8
-        ipId := ipId + 1
-      }
+  val dataLoaded = Reg(Bool()) init False
+  val metaRegs = Reg(MetaInterface(MetaConfig))
+
+  val sendingCycle = U(1, 1 bits) // depend on (max frame width) / (data out width) - 1
+  val sendingCnt = Counter(2)
+
+  val metaSetValid = !dataLoaded | generateDone
+  io.metaIn.ready := True & metaSetValid
+  when(io.metaIn.fire) {
+    dataLoaded := True
+  } elsewhen (generateDone) {
+    dataLoaded := False
+  }
+
+  val needFragment = Reg(Bool()) init False
+  ipFlags := B"2'b0" ## needFragment
+  when(io.metaIn.fire) {
+    metaRegs.srcPort := io.metaIn.srcPort
+    metaRegs.dstPort := io.metaIn.dstPort
+    metaRegs.dstIpAddr := io.metaIn.dstIpAddr
+    metaRegs.dstMacAddr := io.metaIn.dstMacAddr
+    when(io.metaIn.dataLen > 1472) {
+      metaRegs.dataLen := io.metaIn.dataLen - 1472
+      needFragment := True
+      ipLenReg := 1500
+      udpLenReg := 1480
+      ipFragmentOffset := 0
+      packetLen := 48 - 1
+    } otherwise {
+      needFragment := False
+      ipLenReg := io.metaIn.dataLen.resize(16) + 28
+      udpLenReg := io.metaIn.dataLen.resize(16) + 8
+      ipFragmentOffset := 0
+      packetLen := ((((io.metaIn.dataLen + 42) % HeaderGeneratorConfig.DATA_BYTE_CNT) =/= 0) ? U(1, log2Up(packetLenMax) bits) | U(0, log2Up(packetLenMax) bits)) + ((io.metaIn.dataLen + 42) >> 5).takeLow(log2Up(packetLenMax)).asUInt - 1
     }
-
-    val GET_MAC: State = new State {
-      onEntry {
-        io.arpCacheRW.ipAddrWrite := io.metaIn.dstIpAddr
-        io.arpCacheRW.readEna := True
-      }
-      whenIsActive {
-        io.arpCacheRW.readEna := False
-        when(io.arpCacheRW.cacheHit) {
-          goto(UDP_SEND)
-        } elsewhen (io.arpCacheRW.cacheMiss) {
-          goto(ARP_REQUEST_SEND)
-        }
-      }
-    }
-    val ARP_REQUEST_SEND: State = new State {
-      val ethHeader = EthernetHeader(
-        Array(
-          B"48'xff_ff_ff_ff_ff_ff",
-          HeaderGeneratorConfig.SRC_MAC_ADDR.asHex,
-          B"16'x08_06"
-        )
-      )
-      val arpHeader = ARPHeader(
-        Array(
-          HeaderGeneratorConfig.ARP_HTYPE.asHex,
-          HeaderGeneratorConfig.ARP_PTYPE.asHex,
-          HeaderGeneratorConfig.ARP_HLEN.asHex,
-          HeaderGeneratorConfig.ARP_PLEN.asHex,
-          B"16'x00_01",
-          HeaderGeneratorConfig.SRC_MAC_ADDR.asHex,
-          HeaderGeneratorConfig.SRC_IP_ADDR.asHex,
-          "0".asHex,
-          metaRegs.dstIpAddr
-        )
-      )
-      val packetHeader =
-        HeaderGenerator.generate("ARP", Seq(ethHeader, arpHeader))
-      onEntry {}
-    }
-
-    val ARP_REQUEST_WAITING_REPLY: State = new State {
-      val timer = Timeout(5 ms)
-      onEntry {
-        timer.clear()
-      }
-      whenIsActive {
-        when(io.arpReply.fire) {
-          io.arpCacheRW.writeEna.set()
-          io.arpCacheRW.macAddrWrite := io.arpReply.macAddr
-          io.arpCacheRW.ipAddrWrite := io.arpReply.ipAddr
-          goto(UDP_SEND)
-        } elsewhen (timer.stateRise) {
-          goto(ARP_REQUEST_NO_REPLY)
-        }
-      }
-    }
-
-    val ARP_REQUEST_NO_REPLY: State = new State {}
-
-    val ARP_REPLY_SEND: State = new State {}
-
-    val UDP_SEND: State = new State {
-      val ethHeader = EthernetHeader(
-        Array(
-          io.arpCacheRW.macAddrRead,
-          HeaderGeneratorConfig.SRC_MAC_ADDR.asHex,
-          B"16'x08_00"
-        )
-      )
-      val ipv4Header = IPv4Header(
-        Array(
-          B"4'x4",
-          HeaderGeneratorConfig.IPV4_IHL.asHex,
-          HeaderGeneratorConfig.IPV4_DSCP.asHex,
-          HeaderGeneratorConfig.IPV4_ECN.asHex,
-          ipLen,
-          ipId,
-          B"3'b010",
-          HeaderGeneratorConfig.IPV4_TTL,
-          B"8'x11",
-          B"16'x0",
-          HeaderGeneratorConfig.SRC_IP_ADDR,
-          metaRegs.dstIpAddr
-        )
-      )
-      val udpHeader = UDPHeader(
-        Array(
-          metaRegs.srcPort,
-          metaRegs.dstPort,
-          udpLen.asBits,
-          B"16'x0"
-        )
-      )
-      val packetHeader =
-        HeaderGenerator.generate("UDP", Seq(ethHeader, ipv4Header, udpHeader))
-
-      onEntry {
-        sendingCnt.clear()
-      }
-
-      whenIsActive {
-        io.headerAxisOut.data := (sendingCnt.value % 2 === 0) ?
-          packetHeader(sendingCnt) |
-          packetHeader(sendingCnt).rotateRight(
-            10 * HeaderGeneratorConfig.OCTETS
-          )
-        io.headerAxisOut.keep := (sendingCnt.value % 2 === 0) ?
-          B"32'xff_ff_ff_ff" | B"32'xff_c0_00_00"
-        io.headerAxisOut.valid := True
-        io.headerAxisOut.last := False
-        when(io.headerAxisOut.fire) {
-          sendingCnt.increment()
-          when(sendingCnt.value % 2 === 1) {
-            io.headerAxisOut.last := True
-          }
-
-          when(sendingCnt.valueNext === sendingCycle) {
-            goto(IDLE)
-          }
-        }
-      }
+  } elsewhen (io.headerAxisOut.lastFire & needFragment) {
+    when(metaRegs.dataLen > 1480) {
+      needFragment := True
+      ipLenReg := 1500
+      metaRegs.dataLen := metaRegs.dataLen - 1480
+      ipFragmentOffset := ipFragmentOffset + 185
+      packetLen := 48 - 1
+    } otherwise {
+      needFragment := False
+      ipLenReg := metaRegs.dataLen.resize(16) + 20
+      ipFragmentOffset := ipFragmentOffset + 185
+      packetLen := ((((io.metaIn.dataLen + 34) % HeaderGeneratorConfig.DATA_BYTE_CNT) =/= 0) ? U(1, log2Up(packetLenMax) bits) | U(0, log2Up(packetLenMax) bits)) + ((io.metaIn.dataLen + 42) >> 5).takeLow(log2Up(packetLenMax)).asUInt - 1
     }
   }
 
+  when(generateDone) {
+    ipIdReg := ipIdReg + 1
+  }
+
+  val ethHeader = EthernetHeader(
+    Array(
+      metaRegs.dstMacAddr,
+      HeaderGeneratorConfig.SRC_MAC_ADDR.asHex,
+      B"16'x08_00"
+    )
+  )
+
+  val ipv4Header = IPv4Header(
+    Array(
+      B"4'x4",
+      HeaderGeneratorConfig.IPV4_IHL.asHex,
+      HeaderGeneratorConfig.IPV4_DSCP.asHex,
+      HeaderGeneratorConfig.IPV4_ECN.asHex,
+      ipLenReg.asBits,
+      ipIdReg.asBits,
+      ipFlags,
+      ipFragmentOffset.asBits,
+      HeaderGeneratorConfig.IPV4_TTL.asHex,
+      B"8'x11",
+      ipChecksumReg.asBits,
+      HeaderGeneratorConfig.SRC_IP_ADDR.asHex,
+      metaRegs.dstIpAddr
+    )
+  )
+  val udpHeader = UDPHeader(
+    Array(
+      metaRegs.srcPort,
+      metaRegs.dstPort,
+      udpLenReg.asBits,
+      udpChecksumReg.asBits
+    )
+  )
+
+  val ethIpUdpHeader = generate(Seq(ethHeader, ipv4Header, udpHeader))
+  val ethIpHeader = generate(Seq(ethHeader, ipv4Header))
+  val ethIpUdpLastShiftByte = calLastShiftByte(
+    Seq(ethHeader, ipv4Header, udpHeader)
+  )
+  val ethIpLastShiftByte = calLastShiftByte(Seq(ethHeader, ipv4Header))
+  val udpSent = Reg(Bool()) init False
+
+  when(!udpSent) {
+    io.headerAxisOut.data := (sendingCnt.value % 2 === 0) ?
+      ethIpUdpHeader(sendingCnt) |
+      ethIpUdpHeader(sendingCnt).rotateRight(
+        ethIpUdpLastShiftByte * HeaderGeneratorConfig.OCTETS
+      )
+    //  32'xffff_ffff or 32'xffc0_0000
+    io.headerAxisOut.keep := (sendingCnt.value % 2 === 0) ?
+      Bits(HeaderGeneratorConfig.DATA_BYTE_CNT bits).setAll() |
+      B(
+        HeaderGeneratorConfig.DATA_BYTE_CNT bits,
+        (HeaderGeneratorConfig.DATA_BYTE_CNT - 1 downto HeaderGeneratorConfig.DATA_BYTE_CNT - ethIpUdpLastShiftByte) -> true,
+        default -> false
+      )
+    io.headerAxisOut.user := (sendingCnt.value % 2 === 0) ?
+      generateControlSignal(0, True, packetLen) | generateControlSignal(10, False, packetLen)
+  } otherwise {
+    io.headerAxisOut.data := (sendingCnt.value % 2 === 0) ?
+      ethIpHeader(sendingCnt) |
+      ethIpHeader(sendingCnt).rotateRight(
+        ethIpLastShiftByte * HeaderGeneratorConfig.OCTETS
+      )
+    //  32'xffff_ffff or 32'xc000_0000
+    io.headerAxisOut.keep := (sendingCnt.value % 2 === 0) ?
+      Bits(HeaderGeneratorConfig.DATA_BYTE_CNT bits).setAll() |
+      B(
+        HeaderGeneratorConfig.DATA_BYTE_CNT bits,
+        (HeaderGeneratorConfig.DATA_BYTE_CNT - 1 downto HeaderGeneratorConfig.DATA_BYTE_CNT - ethIpLastShiftByte) -> true,
+        default -> false
+      )
+    io.headerAxisOut.user := (sendingCnt.value % 2 === 0) ?
+      generateControlSignal(0, True, packetLen) | generateControlSignal(2, False, packetLen)
+  }
+
+  io.headerAxisOut.valid := dataLoaded
+  when(io.headerAxisOut.fire) {
+    sendingCnt.increment()
+    when(sendingCnt.value % 2 === 1) {
+      io.headerAxisOut.last := True
+    } otherwise {
+      io.headerAxisOut.last := False
+    }
+    when(sendingCnt.value === sendingCycle & needFragment) {
+      udpSent := True
+      generateDone := False
+    } elsewhen (sendingCnt.value === sendingCycle & !needFragment) {
+      generateDone := True
+      udpSent := False
+    } otherwise {
+      generateDone := False
+    }
+  } otherwise {
+    io.headerAxisOut.last := False
+    generateDone := False
+  }
+
+  def getHeaderWidth(header: Seq[Array[Bits]]): Int = {
+    var len: Int = 0
+    header.foreach { protocol =>
+      protocol.foreach { data =>
+        len += data.getBitsWidth
+      }
+    }
+    len
+  }
+
+  def mergeHeader(header: Seq[Array[Bits]]): Vec[Bits] = {
+    val headerWidth: Int = getHeaderWidth(header)
+
+    val tmp = header.flatten
+      .reduce(_ ## _)
+      .subdivideIn(HeaderGeneratorConfig.OCTETS bits)
+      .reduce(_ ## _)
+      .resize(
+        ((headerWidth / HeaderGeneratorConfig.DATA_WIDTH.toFloat).ceil * HeaderGeneratorConfig.DATA_WIDTH).toInt bits
+      )
+      .subdivideIn(HeaderGeneratorConfig.DATA_WIDTH bits)
+
+    tmp
+  }
+
+  def generate(headers: Seq[Array[Bits]]): Vec[Bits] = {
+    val header = mergeHeader(headers)
+    header
+  }
+
+  def calLastShiftByte(header: Seq[Array[Bits]]): Int = {
+    val headerWidth: Int = getHeaderWidth(header)
+    val ret =
+      (headerWidth % HeaderGeneratorConfig.DATA_WIDTH) / HeaderGeneratorConfig.OCTETS
+    ret
+  }
+
+  /**
+  *   31  24      19          13     12      7    0
+  *   ┌────┬──────┬───────────┬──────┬───────┬────┐
+  *   │0x5A│      │ packetLen │ LSel │ Shift │0xA5│
+  *   └────┴──────┴───────────┴──────┴───────┴────┘
+  **/
+  def generateControlSignal(shiftLen: Int, lastSelect: Bool, packetLen: UInt): Bits = {
+    val controlHeader = B"8'xa5"
+    val controlTail = B"8'x5a"
+    val shiftBits = B(shiftLen, 5 bits)
+    val ret = controlTail ## B(0, 4 bits) ## packetLen ## lastSelect ## shiftBits ## controlHeader
+    ret
+  }
 }

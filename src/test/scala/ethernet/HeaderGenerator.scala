@@ -12,8 +12,8 @@ import scala.util.Random
 
 object HeaderGeneratorSim extends App {
 
-  val txConfig = TxGenerics()
-  val arpConfig = ArpCacheGenerics()
+  val headerConfig = HeaderGeneratorGenerics()
+  val metaConfig = MetaInterfaceGenerics()
 
   val flags = VCSFlags(
     compileFlags = List(
@@ -35,57 +35,61 @@ object HeaderGeneratorSim extends App {
     .withVCS(flags)
     .withVCSSimSetup("/home/jerry/workspace/hdl/prj/test/synopsys_sim.setup", null)
     .withFSDBWave
-    .compile(new HeaderGenerator(txConfig, arpConfig))
+    .compile(new HeaderGenerator(headerConfig, metaConfig))
     .doSim { dut =>
       dut.clockDomain.forkStimulus(period = 10)
 
       def initPort(): Unit = {
         dut.io.metaIn.payload.dstIpAddr #= 0
         dut.io.metaIn.payload.dstPort #= 0
+        dut.io.metaIn.payload.dstMacAddr #= 0
         dut.io.metaIn.payload.srcPort #= 0
-        dut.io.metaIn.packetLen #= 0
+        dut.io.metaIn.dataLen #= 0
         dut.io.metaIn.valid #= false
-        dut.io.metaIn.mtu #= PacketMTUEnum.mtu1024
-        dut.io.headerOut.ready #= true
+        dut.io.metaIn.packetMTU #= PacketMTUEnum.mtu1024
+        dut.io.headerAxisOut.ready #= true
       }
       initPort()
 
       dut.clockDomain.waitRisingEdge(50)
 
-      var base : BigInt = "c0a80100".asHex
-      for (i <- 0 until 5) {
-        writeCache(base+i, BigInt(Random.nextInt(65535)))
-      }
-      dut.clockDomain.waitRisingEdge(50)
-
+//      var base : BigInt = "c0a80100".asHex
+//      for (i <- 0 until 5) {
+//        writeCache(base+i, BigInt(Random.nextInt(65535)))
+//      }
+//      dut.clockDomain.waitRisingEdge(50)
+//      StreamReadyRandomizer(dut.io.headerAxisOut, dut.clockDomain)
+      loadMeta()
+      dut.clockDomain.waitRisingEdge(3)
       loadMeta()
       dut.clockDomain.waitRisingEdge(50)
 
       def loadMeta(): Unit = {
-        dut.io.metaIn.payload.dstIpAddr #= "c0a80103".asHex
+        dut.io.metaIn.payload.dstMacAddr #= Random.nextLong().abs % 281474976710655L
+        dut.io.metaIn.payload.dstIpAddr #= Random.nextInt().abs
         dut.io.metaIn.payload.dstPort #= "123".asHex
-        dut.io.metaIn.payload.packetLen #= 1000
+        dut.io.metaIn.payload.dataLen #= 1500
         dut.io.metaIn.valid #= true
         dut.clockDomain.waitRisingEdge()
         dut.io.metaIn.valid #= false
 //        dut.clockDomain.waitActiveEdgeWhere(!dut.io.metaIn.ready.toBoolean)
       }
 
-      def writeCache(addr : BigInt, data : BigInt): Unit ={
-        dut.arpCache.io.writeEna #= true
-        dut.arpCache.io.ipAddrIn #= addr
-        dut.arpCache.io.macAddrIn #= data
-        dut.clockDomain.waitRisingEdge()
-        dut.arpCache.io.writeEna #= false
-      }
+//      def writeCache(addr : BigInt, data : BigInt): Unit ={
+//        dut.arpCache.io.writeEna #= true
+//        dut.arpCache.io.ipAddrIn #= addr
+//        dut.arpCache.io.macAddrIn #= data
+//        dut.clockDomain.waitRisingEdge()
+//        dut.arpCache.io.writeEna #= false
+//      }
       	      simSuccess()
 
     }
 }
 
 object HeaderGeneratorInst extends App {
-  val txConfig = TxGenerics()
-  val arpConfig = ArpCacheGenerics()
+  val headerConfig = HeaderGeneratorGenerics()
+  val metaConfig = MetaInterfaceGenerics()
   SpinalConfig(
     targetDirectory = "./verilog",
     oneFilePerComponent = false,
@@ -95,7 +99,7 @@ object HeaderGeneratorInst extends App {
          |@Author : Jinyuan Huang (Jerry) jjyy.huang@gmail.com
          |@Create : ${Calendar.getInstance().getTime}""".stripMargin
   )
-    .generateVerilog(new HeaderGenerator(txConfig, arpConfig))
+    .generateVerilog(new HeaderGenerator(headerConfig, metaConfig))
     .printPruned()
 }
 
