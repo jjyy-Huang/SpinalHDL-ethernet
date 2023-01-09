@@ -40,13 +40,13 @@ object HeaderGeneratorSim extends App {
       dut.clockDomain.forkStimulus(period = 10)
 
       def initPort(): Unit = {
-        dut.io.metaIn.payload.dstIpAddr #= 0
+        dut.io.metaIn.payload.IpAddr #= 0
         dut.io.metaIn.payload.dstPort #= 0
-        dut.io.metaIn.payload.dstMacAddr #= 0
+        dut.io.metaIn.payload.MacAddr #= 0
         dut.io.metaIn.payload.srcPort #= 0
         dut.io.metaIn.dataLen #= 0
         dut.io.metaIn.valid #= false
-        dut.io.metaIn.packetMTU #= PacketMTUEnum.mtu1024
+//        dut.io.metaIn.packetMTU #= PacketMTUEnum.mtu1024
         dut.io.headerAxisOut.ready #= true
       }
       initPort()
@@ -65,8 +65,8 @@ object HeaderGeneratorSim extends App {
       dut.clockDomain.waitRisingEdge(50)
 
       def loadMeta(): Unit = {
-        dut.io.metaIn.payload.dstMacAddr #= Random.nextLong().abs % 281474976710655L
-        dut.io.metaIn.payload.dstIpAddr #= Random.nextInt().abs
+        dut.io.metaIn.payload.MacAddr #= Random.nextLong().abs % 281474976710655L
+        dut.io.metaIn.payload.IpAddr #= Random.nextInt().abs
         dut.io.metaIn.payload.dstPort #= "123".asHex
         dut.io.metaIn.payload.dataLen #= 1500
         dut.io.metaIn.valid #= true

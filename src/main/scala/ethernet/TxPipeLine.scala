@@ -26,121 +26,6 @@ case class TxGenerics(
     DATA_TUSER_WIDTH: Int = 1,
     INPUT_BUFFER_DEPTH: Int = 256
 )
-
-//class TxControlUnit(config: TxGenerics) extends Component {
-//  val io = new Bundle {
-//    val headerType = in(ProtocolTypeEnum())
-//    val headerGeneratorFinish = in Bool ()
-//    val packetLen = in UInt (config.PACKET_LEN_WIDTH bits)
-//    val dataValid = in Bool ()
-//
-//    val streamSelect = out Bool () setAsReg () init False
-//    val rotateShiftLen = out UInt (log2Up(config.DATA_BYTE_CNT) bits)
-//    val packetLast = out Bool ()
-//    val packetKeep = out Bits (config.DATA_BYTE_CNT bits)
-//    val bypassMask = out Bits (config.DATA_BYTE_CNT bits) setAsReg () init 0
-//  }
-//
-//  def generateLowBitOne(num: UInt): Bits = {
-//    val res = Bits(config.DATA_BYTE_CNT bits)
-//    switch(num) {
-//      for (idx <- 0 until config.DATA_BYTE_CNT) {
-//        if (idx == 0) {
-//          is(idx) {
-//            res := Bits(config.DATA_BYTE_CNT bits).setAll()
-//          }
-//        } else {
-//          is(idx) {
-//            res := B(pow(2, idx).toLong - 1, config.DATA_BYTE_CNT bits)
-//          }
-//        }
-//      }
-//    }
-//    res
-//  }
-//
-//  val shiftLen = UInt(log2Up(config.DATA_BYTE_CNT) bits) setAsReg () init 0
-//  val rotateShiftDelay2 = RegNext(shiftLen) init 0
-//  io.rotateShiftLen := rotateShiftDelay2
-//
-//  val sendingCycle = Reg(UInt(config.PACKET_LEN_WIDTH - 4 bits)) init 0
-//  val lastKeepNum = Reg(UInt(log2Up(config.DATA_BYTE_CNT) bits)) init 0
-//  val controlStateMachine = new StateMachine {
-//    val cyclesCnt = Counter(config.PACKET_LEN_WIDTH - 4 bits) // 8192 >> 5
-//    shiftLen := 0
-//
-//    val isLast = Bool() setAsReg () init False
-//    val isLastDelay = Delay(isLast, 2, init = False)
-//    io.packetLast := isLastDelay
-//    val packerkeep = Bits(config.DATA_BYTE_CNT bits) setAsReg () init 0
-//    val packerKeepDelay =
-//      Delay(packerkeep, 2, init = Bits(config.DATA_BYTE_CNT bits).setAll())
-//    io.packetKeep := packerKeepDelay
-//
-//    val IDLE: State = new State with EntryPoint {
-//      onEntry {
-//        io.streamSelect := False
-//      }
-//      whenIsActive {
-//        io.bypassMask := 0
-//        isLast := False
-//        when(io.headerGeneratorFinish) {
-//          switch(io.headerType) {
-//            is(ProtocolTypeEnum.udp) {
-//              goto(UDP_SENDING)
-//            }
-//            is(ProtocolTypeEnum.arp) {
-//              goto(ARP_REQUEST_SENDING)
-//            }
-//          }
-//        }
-//      }
-//      onExit {
-//        sendingCycle := (io.packetLen.dropLow(5).asUInt - 1).resized
-//        lastKeepNum := io.packetLen.takeLow(5).asUInt
-//        packerkeep := Bits(config.DATA_BYTE_CNT bits).setAll()
-//      }
-//    }
-//
-//    val ARP_REQUEST_SENDING = new State {
-//      onEntry {
-//        shiftLen := 0
-//      }
-//      whenIsActive {
-//        when(io.dataValid) {
-//          goto(IDLE)
-//        }
-//      }
-//      onExit {
-//        isLast := True
-//      }
-//    }
-//
-//    val UDP_SENDING = new State {
-//      onEntry {
-//        cyclesCnt.clear()
-//      }
-//      whenIsActive {
-//        shiftLen := 10
-//        io.streamSelect := True
-//        io.bypassMask := generateLowBitOne(U(22).resized)
-//        when(io.dataValid) {
-//          cyclesCnt.increment()
-////          add cmp mux
-//          when(cyclesCnt.value === sendingCycle) {
-//            packerkeep := generateLowBitOne(lastKeepNum)
-//            goto(IDLE)
-//          }
-//        }
-//      }
-//      onExit {
-//        isLast := True
-//      }
-//
-//    }
-//  }
-//}
-
 object Axi4StreamConditionalJoin {
 
   /** Convert a tuple of streams into a stream of tuples
@@ -166,8 +51,10 @@ object Axi4StreamConditionalJoin {
 //    if (useKeep/useLast/useUser)
     combined.payload._1.keep := source1.fire ? source1.payload.keep | 0
     combined.payload._2.keep := source2.fire ? source2.payload.keep | 0
-    combined.payload._1.user := source1.fire ? source1.payload.user | 0
-    combined.payload._2.user := source2.fire ? source2.payload.user | 0
+    if (source1.user != null & source2.user != null) {
+      combined.payload._1.user := source1.fire ? source1.payload.user | 0
+      combined.payload._2.user := source2.fire ? source2.payload.user | 0
+    }
     combined.payload._1.data := source1.fire ? source1.payload.data | 0
     combined.payload._2.data := source2.fire ? source2.payload.data | 0
     combined.payload._1.last := source1.fire ? source1.payload.last | False
@@ -179,8 +66,8 @@ object Axi4StreamConditionalJoin {
 class TxTop(
     txConfig: TxGenerics,
     metaInterfaceConfig: MetaInterfaceGenerics,
-    headerConfig: HeaderGeneratorGenerics,
-    arpCacheConfig: ArpCacheGenerics
+//    arpCacheConfig: ArpCacheGenerics,
+    headerConfig: HeaderGeneratorGenerics
 ) extends Component {
   val dataAxisCfg = Axi4StreamConfig(
     dataWidth = txConfig.DATA_BYTE_CNT,
@@ -234,13 +121,13 @@ class TxTop(
 
   when(headerBuffered.lastFire) {
     streamMuxReg := 1
-  } elsewhen (dataBufferedReg.lastFire) {
+  } elsewhen (dataBufferedReg.lastFire | invalidData) {
     streamMuxReg := 0
   }
 
   when(forkedStream(1).lastFire) {
     streamJoinReg0 := True
-  } elsewhen (selectedStream.lastFire) {
+  } elsewhen (selectedStream.lastFire | invalidData) {
     streamJoinReg0 := False
   }
 

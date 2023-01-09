@@ -78,7 +78,9 @@ import scala.util.Random
 //}
 
 case class simConfig(
-    packetLen: Int = 53,
+    sendTimes: Int = 32,
+    useRandomPacket: Boolean = true,
+    packetLen: Int = 64,
     dstIpAddr: String = "c0a80103",
     dstPort: String = "156",
     dstMacADdr: String = "fccffccffccf"
@@ -116,18 +118,20 @@ object TxPipeLineSim extends App {
     .withFSDBWave
 //    .withIVerilog
 //    .withWave
-    .compile(new TxTop(txConfig, metaInterfaceConfig, headerConfig, arpCacheConfig))
+    .compile(
+      new TxTop(txConfig, metaInterfaceConfig, headerConfig)
+    )
     .doSim { dut =>
       dut.clockDomain.forkStimulus(period = 10)
 
       def initPort(): Unit = {
-        dut.io.metaIn.payload.dstMacAddr #= 0
-        dut.io.metaIn.payload.dstIpAddr #= 0
+        dut.io.metaIn.payload.MacAddr #= 0
+        dut.io.metaIn.payload.IpAddr #= 0
         dut.io.metaIn.payload.dstPort #= 0
         dut.io.metaIn.payload.srcPort #= 0
         dut.io.metaIn.dataLen #= 0
         dut.io.metaIn.valid #= false
-        dut.io.metaIn.packetMTU #= PacketMTUEnum.mtu1024
+//        dut.io.metaIn.packetMTU #= PacketMTUEnum.mtu1024
         dut.io.dataAxisOut.ready #= true
 
         dut.io.dataAxisIn.valid #= false
@@ -143,40 +147,46 @@ object TxPipeLineSim extends App {
       dut.clockDomain.waitRisingEdge(50)
 
 //      StreamReadyRandomizer(dut.io.dataAxisOut, dut.clockDomain)
-      driveTransaction()
-      driveTransaction()
+      for (idx <- 0 until simCfg.sendTimes) {
+        val sendDataBytes = (if (simCfg.useRandomPacket) Random.nextInt(1400).abs
+                              else simCfg.packetLen)
+        driveTransaction(sendDataBytes)
+      }
 
-      def driveTransaction(): Unit = {
+      def driveTransaction(sendDataBytes: Int): Unit = {
         val a = fork {
-//          dut.clockDomain.waitRisingEdge(Random.nextInt(2).abs)
-          loadMeta()
+          dut.clockDomain.waitRisingEdge(Random.nextInt(32).abs)
+          loadMeta(sendDataBytes)
         }
         val b = fork {
-//          dut.clockDomain.waitRisingEdge(Random.nextInt(2).abs)
-          loadData()
+          dut.clockDomain.waitRisingEdge(Random.nextInt(32).abs)
+          loadData(sendDataBytes)
         }
         a.join()
         b.join()
 //        dut.clockDomain.waitRisingEdge(Random.nextInt(5).abs)
       }
 
-      def loadMeta(): Unit = {
-        dut.io.metaIn.payload.dstMacAddr #= simCfg.dstMacADdr.asHex
-        dut.io.metaIn.payload.dstIpAddr #= simCfg.dstIpAddr.asHex
+      def loadMeta(sendDataBytes: Int): Unit = {
+        dut.io.metaIn.payload.MacAddr #= simCfg.dstMacADdr.asHex
+        dut.io.metaIn.payload.IpAddr #= simCfg.dstIpAddr.asHex
         dut.io.metaIn.payload.dstPort #= simCfg.dstPort.asHex
-        dut.io.metaIn.payload.dataLen #= simCfg.packetLen
+        dut.io.metaIn.payload.dataLen #= sendDataBytes
         dut.io.metaIn.valid #= true
         dut.clockDomain.waitRisingEdge()
         dut.io.metaIn.valid #= false
       }
 
-      def loadData(): Unit = {
-        for (i <- 0 until (simCfg.packetLen.toFloat / 32).ceil.toInt) {
+      def loadData(sendDataBytes: Int): Unit = {
+        for (i <- 0 until (sendDataBytes.toFloat / 32.0f).ceil.toInt) {
           dut.io.dataAxisIn.data #= BigInt(256, Random).toString(16).asHex
           dut.io.dataAxisIn.valid #= true
           dut.io.dataAxisIn.user #= 0
-          if (i == (simCfg.packetLen.toFloat / 32.0).ceil.toInt - 1) {
-            dut.io.dataAxisIn.keep #= (pow(2, simCfg.packetLen - i * 32) - 1).toLong.abs
+          if (i == (sendDataBytes.toFloat / 32.0f).ceil.toInt - 1) {
+            dut.io.dataAxisIn.keep #= (pow(
+              2,
+              sendDataBytes - i * 32
+            ) - 1).toLong.abs
             dut.io.dataAxisIn.last #= true
           } else {
             dut.io.dataAxisIn.last #= false
@@ -189,8 +199,6 @@ object TxPipeLineSim extends App {
           dut.io.dataAxisIn.keep #= 0
         }
       }
-
-
 
 //      def initArpCache(): Unit = {
 //        var base: BigInt = "c0a80100".asHex
@@ -206,7 +214,6 @@ object TxPipeLineSim extends App {
 //        dut.clockDomain.waitRisingEdge()
 //        dut.headerGenerator.arpCache.io.writeEna #= false
 //      }
-
 
       dut.clockDomain.waitRisingEdge(50)
       simSuccess()

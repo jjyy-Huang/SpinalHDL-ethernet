@@ -9,7 +9,6 @@ import spinal.lib.fsm._
 
 import scala.collection.mutable
 import scala.math.pow
-
 case class HeaderGeneratorGenerics(
     SRC_IP_ADDR: String = "c0a80101",
     SRC_MAC_ADDR: String = "123456789abc",
@@ -31,164 +30,6 @@ case class HeaderGeneratorGenerics(
     DATA_TUSER_WIDTH: Int = 1,
     INPUT_BUFFER_DEPTH: Int = 4
 )
-case class MetaInterfaceGenerics(
-    PACKET_LEN_WIDTH: Int = 13,
-    IP_ADDR_WIDTH: Int = 32,
-    PORT_WIDTH: Int = 16,
-    MAC_ADDR_WIDTH: Int = 48
-)
-
-case class MetaInterface(config: MetaInterfaceGenerics)
-    extends Bundle
-    with IMasterSlave {
-  val dataLen = UInt(config.PACKET_LEN_WIDTH bits)
-  val dstMacAddr = Bits(config.MAC_ADDR_WIDTH bits)
-  val dstIpAddr = Bits(config.IP_ADDR_WIDTH bits)
-  val dstPort = Bits(config.PORT_WIDTH bits)
-  val srcPort = Bits(config.PORT_WIDTH bits)
-  val packetMTU = PacketMTUEnum()
-
-  override def asMaster(): Unit = {
-    out(dataLen, dstMacAddr, dstIpAddr, dstPort, srcPort, packetMTU)
-  }
-}
-
-case class EthernetProtocolHeaderConstructor(
-    initField: mutable.LinkedHashMap[String, Int]
-) extends Bundle {
-  def constructHeader(): Array[Bits] = {
-    val fieldName: Array[String] = initField.keys.toArray
-    val fieldWidth: Array[Int] = initField.values.toArray
-    val protocolField = List.tabulate[Bits](initField.size) { index =>
-      val tmp: Bits =
-        Bits(fieldWidth(index) bits) setName fieldName(index)
-      tmp
-    }
-    protocolField.toArray
-  }
-
-}
-// interface workshop
-trait FrameHeader {
-  val frameFieldInit: mutable.LinkedHashMap[String, Int]
-  val header: Array[Bits]
-}
-
-object EthernetHeader {
-  def apply(array: Array[Bits]): Array[Bits] = {
-    val gen = new EthernetHeader
-    require(
-      array.length == gen.header.length,
-      s"Initializing parameters not enough! Require ${gen.header.length} but gave ${array.length}"
-    )
-    gen.header.zipWithIndex.foreach { case (data, idx) =>
-      data := array(idx)
-    }
-    gen.header
-  }
-}
-//methon in compoment
-
-// data strcuture
-case class EthernetHeader() extends Bundle with FrameHeader {
-  val frameFieldInit = mutable.LinkedHashMap(
-    "dstMAC" -> 6 * 8,
-    "srcMAC" -> 6 * 8,
-    "ethType" -> 2 * 8
-  )
-  val header: Array[Bits] =
-    EthernetProtocolHeaderConstructor(frameFieldInit).constructHeader()
-}
-
-object IPv4Header {
-  def apply(array: Array[Bits]): Array[Bits] = {
-    val gen = new IPv4Header
-    require(
-      array.length == gen.header.length,
-      s"Initializing parameters not enough! Require ${gen.header.length} but gave ${array.length}"
-    )
-    gen.header.zipWithIndex.foreach { case (data, idx) =>
-      data := array(idx)
-    }
-    gen.header
-  }
-}
-
-case class IPv4Header() extends Bundle with FrameHeader {
-  val frameFieldInit = mutable.LinkedHashMap(
-    "protocolVersion" -> 4,
-    "internetHeaderLength" -> 4,
-    "differentiatedServicesCodePoint" -> 6,
-    "explicitCongestionNotification" -> 2,
-    "ipLen" -> 2 * 8,
-    "identification" -> 2 * 8,
-    "flags" -> 3,
-    "fragmentOffset" -> 13,
-    "ttl" -> 8,
-    "protocol" -> 8,
-    "ipChecksum" -> 2 * 8,
-    "srcAddr" -> 4 * 8,
-    "dstAddr" -> 4 * 8
-  )
-  val header: Array[Bits] =
-    EthernetProtocolHeaderConstructor(frameFieldInit).constructHeader()
-}
-
-object UDPHeader {
-  def apply(array: Array[Bits]): Array[Bits] = {
-    val gen = new UDPHeader
-    require(
-      array.length == gen.header.length,
-      s"Initializing parameters not enough! Require ${gen.header.length} but gave ${array.length}"
-    )
-    gen.header.zipWithIndex.foreach { case (data, idx) =>
-      data := array(idx)
-    }
-    gen.header
-  }
-}
-
-case class UDPHeader() extends Bundle with FrameHeader {
-  val frameFieldInit = mutable.LinkedHashMap(
-    "srcPort" -> 2 * 8,
-    "dstPort" -> 2 * 8,
-    "len" -> 2 * 8,
-    "udpChecksum" -> 2 * 8
-  )
-  val header: Array[Bits] =
-    EthernetProtocolHeaderConstructor(frameFieldInit).constructHeader()
-}
-
-object ARPHeader {
-  def apply(array: Array[Bits]): Array[Bits] = {
-    val gen = new ARPHeader
-    require(
-      array.length == gen.header.length,
-      s"Initializing parameters not enough! Require ${gen.header.length} but gave ${array.length}"
-    )
-    gen.header.zipWithIndex.foreach { case (data, idx) =>
-      data := array(idx)
-    }
-    gen.header
-  }
-}
-
-case class ARPHeader() extends FrameHeader {
-  val frameFieldInit = mutable.LinkedHashMap(
-    "hardwareType" -> 2 * 8,
-    "protocolType" -> 2 * 8,
-    "hardwareLen" -> 8,
-    "protocolLen" -> 8,
-    "operation" -> 2 * 8,
-    "senderHardwareAddr" -> 6 * 8,
-    "senderProtocolAddr" -> 4 * 8,
-    "targetHardwareAddr" -> 6 * 8,
-    "targetProtocolAddr" -> 4 * 8
-  )
-  val header: Array[Bits] =
-    EthernetProtocolHeaderConstructor(frameFieldInit).constructHeader()
-}
-
 class HeaderGenerator(
     HeaderGeneratorConfig: HeaderGeneratorGenerics,
 //    arpCacheConfig: ArpCacheGenerics,
@@ -215,14 +56,16 @@ class HeaderGenerator(
   val generateDone = Bool()
   val ipFlags = Bits(3 bits)
 
-  val packetLenMax = ((1500+14) / HeaderGeneratorConfig.DATA_BYTE_CNT.toFloat).ceil.toInt
+  val packetLenMax =
+    ((1500 + 14) / HeaderGeneratorConfig.DATA_BYTE_CNT.toFloat).ceil.toInt
   val packetLen = Reg(UInt(log2Up(packetLenMax) bits)) init 0
   println(log2Up(packetLenMax))
 
   val dataLoaded = Reg(Bool()) init False
   val metaRegs = Reg(MetaInterface(MetaConfig))
 
-  val sendingCycle = U(1, 1 bits) // depend on (max frame width) / (data out width) - 1
+  val sendingCycle =
+    U(1, 1 bits) // depend on (max frame width) / (data out width) - 1
   val sendingCnt = Counter(2)
 
   val metaSetValid = !dataLoaded | generateDone
@@ -238,8 +81,8 @@ class HeaderGenerator(
   when(io.metaIn.fire) {
     metaRegs.srcPort := io.metaIn.srcPort
     metaRegs.dstPort := io.metaIn.dstPort
-    metaRegs.dstIpAddr := io.metaIn.dstIpAddr
-    metaRegs.dstMacAddr := io.metaIn.dstMacAddr
+    metaRegs.IpAddr := io.metaIn.IpAddr
+    metaRegs.MacAddr := io.metaIn.MacAddr
     when(io.metaIn.dataLen > 1472) {
       metaRegs.dataLen := io.metaIn.dataLen - 1472
       needFragment := True
@@ -252,7 +95,12 @@ class HeaderGenerator(
       ipLenReg := io.metaIn.dataLen.resize(16) + 28
       udpLenReg := io.metaIn.dataLen.resize(16) + 8
       ipFragmentOffset := 0
-      packetLen := ((((io.metaIn.dataLen + 42) % HeaderGeneratorConfig.DATA_BYTE_CNT) =/= 0) ? U(1, log2Up(packetLenMax) bits) | U(0, log2Up(packetLenMax) bits)) + ((io.metaIn.dataLen + 42) >> 5).takeLow(log2Up(packetLenMax)).asUInt - 1
+      packetLen := ((((io.metaIn.dataLen + 42) % HeaderGeneratorConfig.DATA_BYTE_CNT) =/= 0) ? U(
+        1,
+        log2Up(packetLenMax) bits
+      ) | U(0, log2Up(packetLenMax) bits)) + ((io.metaIn.dataLen + 42) >> 5)
+        .takeLow(log2Up(packetLenMax))
+        .asUInt - 1
     }
   } elsewhen (io.headerAxisOut.lastFire & needFragment) {
     when(metaRegs.dataLen > 1480) {
@@ -265,7 +113,12 @@ class HeaderGenerator(
       needFragment := False
       ipLenReg := metaRegs.dataLen.resize(16) + 20
       ipFragmentOffset := ipFragmentOffset + 185
-      packetLen := ((((io.metaIn.dataLen + 34) % HeaderGeneratorConfig.DATA_BYTE_CNT) =/= 0) ? U(1, log2Up(packetLenMax) bits) | U(0, log2Up(packetLenMax) bits)) + ((io.metaIn.dataLen + 42) >> 5).takeLow(log2Up(packetLenMax)).asUInt - 1
+      packetLen := ((((io.metaIn.dataLen + 34) % HeaderGeneratorConfig.DATA_BYTE_CNT) =/= 0) ? U(
+        1,
+        log2Up(packetLenMax) bits
+      ) | U(0, log2Up(packetLenMax) bits)) + ((io.metaIn.dataLen + 42) >> 5)
+        .takeLow(log2Up(packetLenMax))
+        .asUInt - 1
     }
   }
 
@@ -275,7 +128,7 @@ class HeaderGenerator(
 
   val ethHeader = EthernetHeader(
     Array(
-      metaRegs.dstMacAddr,
+      metaRegs.MacAddr,
       HeaderGeneratorConfig.SRC_MAC_ADDR.asHex,
       B"16'x08_00"
     )
@@ -295,7 +148,7 @@ class HeaderGenerator(
       B"8'x11",
       ipChecksumReg.asBits,
       HeaderGeneratorConfig.SRC_IP_ADDR.asHex,
-      metaRegs.dstIpAddr
+      metaRegs.IpAddr
     )
   )
   val udpHeader = UDPHeader(
@@ -330,7 +183,11 @@ class HeaderGenerator(
         default -> false
       )
     io.headerAxisOut.user := (sendingCnt.value % 2 === 0) ?
-      generateControlSignal(0, True, packetLen) | generateControlSignal(10, False, packetLen)
+      generateControlSignal(0, True, packetLen) | generateControlSignal(
+        10,
+        False,
+        packetLen
+      )
   } otherwise {
     io.headerAxisOut.data := (sendingCnt.value % 2 === 0) ?
       ethIpHeader(sendingCnt) |
@@ -346,7 +203,11 @@ class HeaderGenerator(
         default -> false
       )
     io.headerAxisOut.user := (sendingCnt.value % 2 === 0) ?
-      generateControlSignal(0, True, packetLen) | generateControlSignal(2, False, packetLen)
+      generateControlSignal(0, True, packetLen) | generateControlSignal(
+        2,
+        False,
+        packetLen
+      )
   }
 
   io.headerAxisOut.valid := dataLoaded
@@ -408,17 +269,21 @@ class HeaderGenerator(
     ret
   }
 
-  /**
-  *   31  24      19          13     12      7    0
-  *   ┌────┬──────┬───────────┬──────┬───────┬────┐
-  *   │0x5A│      │ packetLen │ LSel │ Shift │0xA5│
-  *   └────┴──────┴───────────┴──────┴───────┴────┘
-  **/
-  def generateControlSignal(shiftLen: Int, lastSelect: Bool, packetLen: UInt): Bits = {
+  /**   31  24      19          13     12      7    0
+    *   ┌────┬──────┬───────────┬──────┬───────┬────┐
+    *   │0x5A│      │ packetLen │ LSel │ Shift │0xA5│
+    *   └────┴──────┴───────────┴──────┴───────┴────┘
+    */
+  def generateControlSignal(
+      shiftLen: Int,
+      lastSelect: Bool,
+      packetLen: UInt
+  ): Bits = {
     val controlHeader = B"8'xa5"
     val controlTail = B"8'x5a"
     val shiftBits = B(shiftLen, 5 bits)
-    val ret = controlTail ## B(0, 4 bits) ## packetLen ## lastSelect ## shiftBits ## controlHeader
+    val ret = controlTail ## B(0, 4 bits) ##
+      packetLen ## lastSelect ## shiftBits ## controlHeader
     ret
   }
 }
