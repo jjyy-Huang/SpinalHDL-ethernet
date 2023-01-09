@@ -12,24 +12,24 @@ import java.util.Calendar
 import scala.math._
 
 case class RxGenerics(
-                       IP_ADDR_WIDTH: Int = 32,
-                       PORT_WIDTH: Int = 16,
-                       DATA_WIDTH: Int = 256,
-                       DATA_BYTE_CNT: Int = 32,
-                       OCTETS: Int = 8,
-                       DATA_USE_TLAST: Boolean = true,
-                       DATA_USE_TUSER: Boolean = true,
-                       DATA_USE_TKEEP: Boolean = true,
-                       DATA_USE_TSTRB: Boolean = false,
-                       DATA_TUSER_WIDTH: Int = 1,
-                       INPUT_BUFFER_DEPTH: Int = 256
+    IP_ADDR_WIDTH: Int = 32,
+    PORT_WIDTH: Int = 16,
+    DATA_WIDTH: Int = 256,
+    DATA_BYTE_CNT: Int = 32,
+    OCTETS: Int = 8,
+    DATA_USE_TLAST: Boolean = true,
+    DATA_USE_TUSER: Boolean = true,
+    DATA_USE_TKEEP: Boolean = true,
+    DATA_USE_TSTRB: Boolean = false,
+    DATA_TUSER_WIDTH: Int = 1,
+    INPUT_BUFFER_DEPTH: Int = 256
 )
 
-
-//scala format ! scala fix? code manager
-class RxTop(rxConfig: RxGenerics,
-            metaInterfaceConfig: MetaInterfaceGenerics,
-            headerConfig: HeaderRecognizerGenerics) extends Component {
+class RxTop(
+    rxConfig: RxGenerics,
+    metaInterfaceConfig: MetaInterfaceGenerics,
+    headerConfig: HeaderRecognizerGenerics
+) extends Component {
   val dataAxisCfg = Axi4StreamConfig(
     dataWidth = rxConfig.DATA_BYTE_CNT,
     userWidth = rxConfig.DATA_TUSER_WIDTH,
@@ -41,9 +41,9 @@ class RxTop(rxConfig: RxGenerics,
 
   val io = new Bundle {
 
-  val dataAxisIn = slave(Axi4Stream(dataAxisCfg))
-  val metaOut = master Stream MetaInterface(metaInterfaceConfig)
-  val dataAxisOut = master(Axi4Stream(dataAxisCfg))
+    val dataAxisIn = slave(Axi4Stream(dataAxisCfg))
+    val metaOut = master Stream MetaInterface(metaInterfaceConfig)
+    val dataAxisOut = master(Axi4Stream(dataAxisCfg))
   }
 
   val dataBuffered = io.dataAxisIn.queue(rxConfig.INPUT_BUFFER_DEPTH)

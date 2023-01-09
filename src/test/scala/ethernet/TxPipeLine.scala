@@ -148,8 +148,9 @@ object TxPipeLineSim extends App {
 
 //      StreamReadyRandomizer(dut.io.dataAxisOut, dut.clockDomain)
       for (idx <- 0 until simCfg.sendTimes) {
-        val sendDataBytes = (if (simCfg.useRandomPacket) Random.nextInt(1400).abs
-                              else simCfg.packetLen)
+        val sendDataBytes =
+          (if (simCfg.useRandomPacket) Random.nextInt(1400).abs
+           else simCfg.packetLen)
         driveTransaction(sendDataBytes)
       }
 

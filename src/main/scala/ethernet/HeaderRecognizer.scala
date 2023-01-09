@@ -7,21 +7,23 @@ import spinal.lib.bus.amba4.axis._
 import scala.collection.mutable
 
 case class HeaderRecognizerGenerics(
-                                    SRC_IP_ADDR: String = "c0a80104",
-                                    SRC_MAC_ADDR: String = "fccffccffccf",
+    SRC_IP_ADDR: String = "c0a80104",
+    SRC_MAC_ADDR: String = "fccffccffccf",
+    DATA_WIDTH: Int = 256,
+    DATA_BYTE_CNT: Int = 32,
+    OCTETS: Int = 8,
+    DATA_USE_TLAST: Boolean = true,
+    DATA_USE_TUSER: Boolean = false,
+    DATA_USE_TKEEP: Boolean = true,
+    DATA_USE_TSTRB: Boolean = false,
+    DATA_TUSER_WIDTH: Int = 1,
+    INPUT_BUFFER_DEPTH: Int = 4
+)
 
-                                    DATA_WIDTH: Int = 256,
-                                    DATA_BYTE_CNT: Int = 32,
-                                    OCTETS: Int = 8,
-                                    DATA_USE_TLAST: Boolean = true,
-                                    DATA_USE_TUSER: Boolean = false,
-                                    DATA_USE_TKEEP: Boolean = true,
-                                    DATA_USE_TSTRB: Boolean = false,
-                                    DATA_TUSER_WIDTH: Int = 1,
-                                    INPUT_BUFFER_DEPTH: Int = 4
-                                  )
-
-class HeaderRecognizer(HeaderConfig : HeaderRecognizerGenerics, MetaConfig: MetaInterfaceGenerics) extends Component{
+class HeaderRecognizer(
+    HeaderConfig: HeaderRecognizerGenerics,
+    MetaConfig: MetaInterfaceGenerics
+) extends Component {
   val headerAxisOutConfig = Axi4StreamConfig(
     dataWidth = HeaderConfig.DATA_BYTE_CNT,
     userWidth = HeaderConfig.DATA_TUSER_WIDTH,
@@ -32,7 +34,6 @@ class HeaderRecognizer(HeaderConfig : HeaderRecognizerGenerics, MetaConfig: Meta
   val io = new Bundle {
     val dataAxisIn = slave(Axi4Stream(headerAxisOutConfig))
 
-
     val metaOut = master Stream MetaInterface(MetaConfig)
     val dataAxisOut = master(Axi4Stream(headerAxisOutConfig))
   }
@@ -40,15 +41,18 @@ class HeaderRecognizer(HeaderConfig : HeaderRecognizerGenerics, MetaConfig: Meta
   val recognizerRunning = Reg(Bool()) init False
   val recognizerStart = recognizerRunning.rise()
   val (packetStream, packetReg) = StreamFork2(io.dataAxisIn)
-  val packetStreamReg = packetReg stage()
+  val packetStreamReg = packetReg stage ()
   val combineData = packetStream.payload.data ## packetStreamReg.payload.data
 
   val setMeta = recognizerStart & packetStream.fire
 
 //  need redesign
-  val (ethHeaderName, ethHeaderExtract) = EthernetHeader.unapply(combineData.takeLow(112))
-  val (ipv4HeaderName, ipv4HeaderExtract) = IPv4Header.unapply(combineData.dropLow(112).takeLow(160))
-  val (udpHeaderName, udpHeaderExtract) = UDPHeader.unapply(combineData.dropLow(272).takeLow(64))
+  val (ethHeaderName, ethHeaderExtract) =
+    EthernetHeader.unapply(combineData.takeLow(112))
+  val (ipv4HeaderName, ipv4HeaderExtract) =
+    IPv4Header.unapply(combineData.dropLow(112).takeLow(160))
+  val (udpHeaderName, udpHeaderExtract) =
+    UDPHeader.unapply(combineData.dropLow(272).takeLow(64))
 
   val ethHeaderExtractReg = Array.tabulate(ethHeaderExtract.length) { idx =>
     val dataReg: Bits = RegNextWhen(ethHeaderExtract(idx), setMeta)
@@ -87,13 +91,21 @@ class HeaderRecognizer(HeaderConfig : HeaderRecognizerGenerics, MetaConfig: Meta
         when(ethHeader("ethType") === B"16'x08_00") {
           when(ipv4Header("protocol") === B"8'x11") {
             isUdp := True
-            when(ipv4Header("flags") === B"3'b0" && ipv4Header("fragmentOffset") === B"13'b0") {
+            when(
+              ipv4Header("flags") === B"3'b0" && ipv4Header(
+                "fragmentOffset"
+              ) === B"13'b0"
+            ) {
               dataLen := (ipv4Header("ipLen").asUInt - 28).resized
               shiftLen := 22
-              packetLen := ((((ipv4Header("ipLen").asUInt + 14) % HeaderConfig.DATA_BYTE_CNT) =/= 0) ? U(
+              packetLen := ((((ipv4Header(
+                "ipLen"
+              ).asUInt + 14) % HeaderConfig.DATA_BYTE_CNT) =/= 0) ? U(
                 1,
                 log2Up(packetLenMax) bits
-              ) | U(0, log2Up(packetLenMax) bits)) + ((ipv4Header("ipLen").asUInt + 14) >> 5)
+              ) | U(0, log2Up(packetLenMax) bits)) + ((ipv4Header(
+                "ipLen"
+              ).asUInt + 14) >> 5)
                 .takeLow(log2Up(packetLenMax))
                 .asUInt - 1
             } // TODO: Fragment not support
@@ -106,9 +118,9 @@ class HeaderRecognizer(HeaderConfig : HeaderRecognizerGenerics, MetaConfig: Meta
     } otherwise {
       addrCorrect.clear()
     }
-  } elsewhen(packetStream.lastFire) {
+  } elsewhen (packetStream.lastFire) {
     checked.clear()
-  } elsewhen(io.metaOut.fire) {
+  } elsewhen (io.metaOut.fire) {
     isUdp.clear()
   }
 
@@ -126,7 +138,7 @@ class HeaderRecognizer(HeaderConfig : HeaderRecognizerGenerics, MetaConfig: Meta
 
   when(packetStream.lastFire) {
     recognizerRunning.clear()
-  } elsewhen(packetStream.fire) {
+  } elsewhen (packetStream.fire) {
     recognizerRunning.set()
   }
 
@@ -197,12 +209,14 @@ class HeaderRecognizer(HeaderConfig : HeaderRecognizerGenerics, MetaConfig: Meta
   val dataStreamRegValid = (addrCorrect && checked) | addrCorrect
   val dataStreamValid = (addrCorrect && checked)
 
-  val dataStreamReg = packetStreamReg takeWhen (dataStreamRegValid) stage()
-  val dataStream = packetStream takeWhen (dataStreamValid) stage()
+  val dataStreamReg = packetStreamReg takeWhen (dataStreamRegValid) stage ()
+  val dataStream = packetStream takeWhen (dataStreamValid) stage ()
 
-  val dataJoinStream = Axi4StreamConditionalJoin(dataStreamReg, dataStream, True, True) stage()
+  val dataJoinStream =
+    Axi4StreamConditionalJoin(dataStreamReg, dataStream, True, True) stage ()
   val maskStage = packetStream.clone()
-  val mask = RegNextWhen(generateByteMask(shiftLen), isUdp & dataStreamReg.fire) init 0
+  val mask =
+    RegNextWhen(generateByteMask(shiftLen), isUdp & dataStreamReg.fire) init 0
 
   maskStage.arbitrationFrom(dataJoinStream)
   maskStage.data := byteMaskData(

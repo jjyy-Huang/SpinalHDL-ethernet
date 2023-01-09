@@ -91,7 +91,7 @@ class TxTop(
   val headerGenerator =
     new HeaderGenerator(headerConfig, metaInterfaceConfig)
   headerGenerator.io.metaIn << metaBuffered
-  val headerBuffered= headerGenerator.io.headerAxisOut.queue(16)
+  val headerBuffered = headerGenerator.io.headerAxisOut.queue(16)
   val forkedStream = StreamFork(dataBuffered, 2)
 
   val dataBufferedReg = forkedStream(0).stage()
@@ -103,8 +103,10 @@ class TxTop(
   val invalidData = Bool()
 
   val selectedStream =
-    StreamMux(streamMuxReg, Vec(headerBuffered, dataBufferedReg)) s2mPipe () throwWhen(invalidData)
-
+    StreamMux(
+      streamMuxReg,
+      Vec(headerBuffered, dataBufferedReg)
+    ) s2mPipe () throwWhen (invalidData)
 
   val joinedStream = Axi4StreamConditionalJoin(
     selectedStream,
@@ -200,7 +202,9 @@ class TxTop(
   val packetLen = selectedStream.user(19 downto 14).asUInt
 
   val maskStage = dataBufferedReg.clone()
-  val cntTrigger = selectedStream.fire && (selectedStream.user.takeLow(8) === B"8'xA5") && (selectedStream.user
+  val cntTrigger = selectedStream.fire && (selectedStream.user.takeLow(
+    8
+  ) === B"8'xA5") && (selectedStream.user
     .takeHigh(8) === B"8'x5A") && selectedStream.user(13)
 
   when(selectedStream.fire) {
@@ -220,7 +224,6 @@ class TxTop(
 
   invalidData := transactionCounter.io.done & streamJoinReg0
 
-
   maskStage.arbitrationFrom(joinedStream)
   maskStage.data := byteMaskData(
     ~mask,
@@ -232,7 +235,6 @@ class TxTop(
   ) | byteMaskData(mask, joinedStream.payload._2.keep)
   maskStage.user := 0
   maskStage.last := transactionCounter.io.last
-
 
   val shiftStage = maskStage.clone()
   shiftStage.arbitrationFrom(maskStage)

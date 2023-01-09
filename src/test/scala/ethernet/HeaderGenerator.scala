@@ -9,7 +9,6 @@ import java.util.Calendar
 import scala.math._
 import scala.util.Random
 
-
 object HeaderGeneratorSim extends App {
 
   val headerConfig = HeaderGeneratorGenerics()
@@ -27,13 +26,15 @@ object HeaderGeneratorSim extends App {
       "xil_defaultlib.glbl "
     ),
     runFlags = List(
-
     )
   )
 
   SimConfig
     .withVCS(flags)
-    .withVCSSimSetup("/home/jerry/workspace/hdl/prj/test/synopsys_sim.setup", null)
+    .withVCSSimSetup(
+      "/home/jerry/workspace/hdl/prj/test/synopsys_sim.setup",
+      null
+    )
     .withFSDBWave
     .compile(new HeaderGenerator(headerConfig, metaConfig))
     .doSim { dut =>
@@ -65,7 +66,9 @@ object HeaderGeneratorSim extends App {
       dut.clockDomain.waitRisingEdge(50)
 
       def loadMeta(): Unit = {
-        dut.io.metaIn.payload.MacAddr #= Random.nextLong().abs % 281474976710655L
+        dut.io.metaIn.payload.MacAddr #= Random
+          .nextLong()
+          .abs % 281474976710655L
         dut.io.metaIn.payload.IpAddr #= Random.nextInt().abs
         dut.io.metaIn.payload.dstPort #= "123".asHex
         dut.io.metaIn.payload.dataLen #= 1500
@@ -82,7 +85,7 @@ object HeaderGeneratorSim extends App {
 //        dut.clockDomain.waitRisingEdge()
 //        dut.arpCache.io.writeEna #= false
 //      }
-      	      simSuccess()
+      simSuccess()
 
     }
 }
@@ -94,12 +97,10 @@ object HeaderGeneratorInst extends App {
     targetDirectory = "./verilog",
     oneFilePerComponent = false,
     removePruned = true,
-    rtlHeader =
-      s"""
+    rtlHeader = s"""
          |@Author : Jinyuan Huang (Jerry) jjyy.huang@gmail.com
          |@Create : ${Calendar.getInstance().getTime}""".stripMargin
   )
     .generateVerilog(new HeaderGenerator(headerConfig, metaConfig))
     .printPruned()
 }
-
