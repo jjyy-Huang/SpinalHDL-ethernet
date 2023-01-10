@@ -88,7 +88,6 @@ case class simConfig(
 object TxPipeLineSim extends App {
 
   val txConfig = TxGenerics()
-  val metaInterfaceConfig = MetaInterfaceGenerics()
   val headerConfig = HeaderGeneratorGenerics()
   val arpCacheConfig = ArpCacheGenerics()
 
@@ -119,7 +118,7 @@ object TxPipeLineSim extends App {
 //    .withIVerilog
 //    .withWave
     .compile(
-      new TxTop(txConfig, metaInterfaceConfig, headerConfig)
+      new TxTop(txConfig, headerConfig)
     )
     .doSim { dut =>
       dut.clockDomain.forkStimulus(period = 10)
@@ -156,11 +155,11 @@ object TxPipeLineSim extends App {
 
       def driveTransaction(sendDataBytes: Int): Unit = {
         val a = fork {
-          dut.clockDomain.waitRisingEdge(Random.nextInt(32).abs)
+//          dut.clockDomain.waitRisingEdge(Random.nextInt(32).abs)
           loadMeta(sendDataBytes)
         }
         val b = fork {
-          dut.clockDomain.waitRisingEdge(Random.nextInt(32).abs)
+//          dut.clockDomain.waitRisingEdge(Random.nextInt(32).abs)
           loadData(sendDataBytes)
         }
         a.join()

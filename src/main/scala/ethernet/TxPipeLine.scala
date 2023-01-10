@@ -65,7 +65,6 @@ object Axi4StreamConditionalJoin {
 
 class TxTop(
     txConfig: TxGenerics,
-    metaInterfaceConfig: MetaInterfaceGenerics,
 //    arpCacheConfig: ArpCacheGenerics,
     headerConfig: HeaderGeneratorGenerics
 ) extends Component {
@@ -79,7 +78,7 @@ class TxTop(
   )
 
   val io = new Bundle {
-    val metaIn = slave Stream MetaInterface(metaInterfaceConfig)
+    val metaIn = slave Stream MetaInterface()
 
     val dataAxisIn = slave(Axi4Stream(dataAxisCfg))
     val dataAxisOut = master(Axi4Stream(dataAxisCfg))
@@ -89,7 +88,7 @@ class TxTop(
   val metaBuffered = io.metaIn.queue(headerConfig.INPUT_BUFFER_DEPTH)
 
   val headerGenerator =
-    new HeaderGenerator(headerConfig, metaInterfaceConfig)
+    new HeaderGenerator(headerConfig)
   headerGenerator.io.metaIn << metaBuffered
   val headerBuffered = headerGenerator.io.headerAxisOut.queue(16)
   val forkedStream = StreamFork(dataBuffered, 2)

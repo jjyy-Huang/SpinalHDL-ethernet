@@ -12,7 +12,6 @@ import scala.util.Random
 object HeaderGeneratorSim extends App {
 
   val headerConfig = HeaderGeneratorGenerics()
-  val metaConfig = MetaInterfaceGenerics()
 
   val flags = VCSFlags(
     compileFlags = List(
@@ -36,7 +35,7 @@ object HeaderGeneratorSim extends App {
       null
     )
     .withFSDBWave
-    .compile(new HeaderGenerator(headerConfig, metaConfig))
+    .compile(new HeaderGenerator(headerConfig))
     .doSim { dut =>
       dut.clockDomain.forkStimulus(period = 10)
 
@@ -71,7 +70,7 @@ object HeaderGeneratorSim extends App {
           .abs % 281474976710655L
         dut.io.metaIn.payload.IpAddr #= Random.nextInt().abs
         dut.io.metaIn.payload.dstPort #= "123".asHex
-        dut.io.metaIn.payload.dataLen #= 1500
+        dut.io.metaIn.payload.dataLen #= 1024
         dut.io.metaIn.valid #= true
         dut.clockDomain.waitRisingEdge()
         dut.io.metaIn.valid #= false
@@ -92,7 +91,6 @@ object HeaderGeneratorSim extends App {
 
 object HeaderGeneratorInst extends App {
   val headerConfig = HeaderGeneratorGenerics()
-  val metaConfig = MetaInterfaceGenerics()
   SpinalConfig(
     targetDirectory = "./verilog",
     oneFilePerComponent = false,
@@ -101,6 +99,6 @@ object HeaderGeneratorInst extends App {
          |@Author : Jinyuan Huang (Jerry) jjyy.huang@gmail.com
          |@Create : ${Calendar.getInstance().getTime}""".stripMargin
   )
-    .generateVerilog(new HeaderGenerator(headerConfig, metaConfig))
+    .generateVerilog(new HeaderGenerator(headerConfig))
     .printPruned()
 }
