@@ -1,14 +1,8 @@
 package ethernet
+
 import spinal.core._
-import spinal.core.internals.Operator
-import spinal.core.sim._
-import spinal.lib
-import spinal.lib._
-import spinal.lib.bus.amba4.axis.{Axi4Stream, Axi4StreamConfig}
-import spinal.lib.fsm._
 
 import scala.collection.mutable
-import scala.math.pow
 
 object EthernetProtocolConstant {
   val DATA_WIDTH = 256
@@ -64,8 +58,6 @@ object EthernetProtocolConstant {
   val UDP_LENGTH_WIDTH = 16
   val UDP_CHECKSUM_WIDTH = 16
 }
-
-import EthernetProtocolConstant._
 case class EthernetProtocolHeaderConstructor(
     initField: mutable.LinkedHashMap[String, Int]
 ) extends Bundle {

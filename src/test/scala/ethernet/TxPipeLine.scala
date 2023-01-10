@@ -164,7 +164,7 @@ object TxPipeLineSim extends App {
         }
         a.join()
         b.join()
-//        dut.clockDomain.waitRisingEdge(Random.nextInt(5).abs)
+        dut.clockDomain.waitRisingEdge(Random.nextInt(20).abs)
       }
 
       def loadMeta(sendDataBytes: Int): Unit = {

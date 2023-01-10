@@ -4,8 +4,6 @@ import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba4.axis._
 
-import scala.collection.mutable
-
 case class HeaderRecognizerGenerics(
     SRC_IP_ADDR: String = "c0a80104",
     SRC_MAC_ADDR: String = "fccffccffccf",
@@ -21,8 +19,7 @@ case class HeaderRecognizerGenerics(
 )
 
 class HeaderRecognizer(
-    HeaderConfig: HeaderRecognizerGenerics,
-    MetaConfig: MetaInterfaceGenerics
+    HeaderConfig: HeaderRecognizerGenerics
 ) extends Component {
   val headerAxisOutConfig = Axi4StreamConfig(
     dataWidth = HeaderConfig.DATA_BYTE_CNT,
@@ -34,7 +31,7 @@ class HeaderRecognizer(
   val io = new Bundle {
     val dataAxisIn = slave(Axi4Stream(headerAxisOutConfig))
 
-    val metaOut = master Stream MetaInterface(MetaConfig)
+    val metaOut = master Stream MetaInterface()
     val dataAxisOut = master(Axi4Stream(headerAxisOutConfig))
   }
 
@@ -96,6 +93,7 @@ class HeaderRecognizer(
                 "fragmentOffset"
               ) === B"13'b0"
             ) {
+//              val name instead para
               dataLen := (ipv4Header("ipLen").asUInt - 28).resized
               shiftLen := 22
               packetLen := ((((ipv4Header(
@@ -124,7 +122,7 @@ class HeaderRecognizer(
     isUdp.clear()
   }
 
-  val metaCfg = Stream(MetaInterface(MetaConfig))
+  val metaCfg = Stream(MetaInterface())
 
   metaCfg.valid := True & isUdp.rise()
 

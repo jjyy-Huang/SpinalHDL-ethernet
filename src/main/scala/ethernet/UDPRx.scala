@@ -3,13 +3,6 @@ package ethernet
 import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba4.axis._
-import spinal.core.Mem
-import ethernet.PacketMTUEnum
-import spinal.core.internals.Operator
-import spinal.lib.fsm._
-
-import java.util.Calendar
-import scala.math._
 
 case class RxGenerics(
     IP_ADDR_WIDTH: Int = 32,
@@ -27,7 +20,6 @@ case class RxGenerics(
 
 class RxTop(
     rxConfig: RxGenerics,
-    metaInterfaceConfig: MetaInterfaceGenerics,
     headerConfig: HeaderRecognizerGenerics
 ) extends Component {
   val dataAxisCfg = Axi4StreamConfig(
@@ -42,13 +34,13 @@ class RxTop(
   val io = new Bundle {
 
     val dataAxisIn = slave(Axi4Stream(dataAxisCfg))
-    val metaOut = master Stream MetaInterface(metaInterfaceConfig)
+    val metaOut = master Stream MetaInterface()
     val dataAxisOut = master(Axi4Stream(dataAxisCfg))
   }
 
   val dataBuffered = io.dataAxisIn.queue(rxConfig.INPUT_BUFFER_DEPTH)
 
-  val headerRecognizer = new HeaderRecognizer(headerConfig, metaInterfaceConfig)
+  val headerRecognizer = new HeaderRecognizer(headerConfig)
   headerRecognizer.io.dataAxisIn << dataBuffered
 
   io.dataAxisOut <-< headerRecognizer.io.dataAxisOut

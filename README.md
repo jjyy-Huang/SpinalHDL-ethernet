@@ -33,6 +33,7 @@ There is the specification of Rx I/O:
 
 
 ## TODO
+- Redesign Rx module control logic
 - ARP request module
 - ICMP module
 - Data Width support 384b/512b

@@ -22,7 +22,6 @@ case class HRSimConfig(
 object HeaderRecognizerSim extends App {
 
   val headerConfig = HeaderRecognizerGenerics()
-  val metaConfig = MetaInterfaceGenerics()
   val simCfg = HRSimConfig()
 
   val flags = VCSFlags(
@@ -49,7 +48,7 @@ object HeaderRecognizerSim extends App {
     .withFSDBWave
 //    .withIVerilog
 //    .withWave
-    .compile(new HeaderRecognizer(headerConfig, metaConfig))
+    .compile(new HeaderRecognizer(headerConfig))
     .doSim { dut =>
       dut.clockDomain.forkStimulus(period = 10)
 //      val rxData = Array(

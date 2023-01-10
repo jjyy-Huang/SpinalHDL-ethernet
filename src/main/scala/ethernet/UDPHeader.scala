@@ -1,7 +1,7 @@
 package ethernet
 
+import ethernet.EthernetProtocolConstant._
 import spinal.core._
-import EthernetProtocolConstant._
 
 import scala.collection.mutable
 

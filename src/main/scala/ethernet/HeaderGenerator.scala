@@ -1,16 +1,9 @@
 package ethernet
-import spinal.core._
-import spinal.core.internals.Operator
-import spinal.core.sim._
-import spinal.lib
-import spinal.lib._
-import spinal.lib.bus.amba4.axis.{Axi4Stream, Axi4StreamConfig}
-import spinal.lib.fsm._
-
-import scala.collection.mutable
-import scala.math.pow
 
 import EthernetProtocolConstant._
+import spinal.core._
+import spinal.lib._
+import spinal.lib.bus.amba4.axis.{Axi4Stream, Axi4StreamConfig}
 
 case class HeaderGeneratorGenerics(
     DATA_WIDTH: Int = DATA_WIDTH,
