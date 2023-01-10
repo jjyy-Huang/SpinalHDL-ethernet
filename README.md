@@ -31,6 +31,8 @@ There is the specification of Rx I/O:
 | metaOut     | master    | Stream(MetaInterface)                  | Stream of meta of this  transaction                      |
 | dataAxisOut | master    | Stream(Axi4StreamBundle)[tKeep, tLast] | Stream of data which has unpacked from ethernet protocol |
 
+## A Simple Verification
+![](.pic/txwave.png)
 
 ## TODO
 - Redesign Rx module control logic
