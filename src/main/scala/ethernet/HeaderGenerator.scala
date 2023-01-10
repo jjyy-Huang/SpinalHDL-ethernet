@@ -23,7 +23,7 @@ case class HeaderGeneratorGenerics(
     INPUT_BUFFER_DEPTH: Int = 4
 )
 class HeaderGenerator(
-    HeaderGeneratorConfig: HeaderGeneratorGenerics,
+    HeaderGeneratorConfig: HeaderGeneratorGenerics
 //    arpCacheConfig: ArpCacheGenerics
 ) extends Component {
   val headerAxisOutConfig = Axi4StreamConfig(
@@ -77,28 +77,39 @@ class HeaderGenerator(
       packetLen := packetLenMax - 1
     } otherwise {
       needFragment := False
-      ipLenReg := io.metaIn.dataLen.resize(IP_LENGTH_WIDTH) + IP_HEADER_LENGTH + UDP_HEADER_LENGTH
+      ipLenReg := io.metaIn.dataLen.resize(
+        IP_LENGTH_WIDTH
+      ) + IP_HEADER_LENGTH + UDP_HEADER_LENGTH
       udpLenReg := io.metaIn.dataLen.resize(IP_LENGTH_WIDTH) + UDP_HEADER_LENGTH
       packetLen := ((((io.metaIn.dataLen + HEADER_TOTAL_LENGTH) % HeaderGeneratorConfig.DATA_BYTE_CNT) =/= 0) ? U(
         1,
         log2Up(packetLenMax) bits
-      ) | U(0, log2Up(packetLenMax) bits)) + ((io.metaIn.dataLen + HEADER_TOTAL_LENGTH) >> 5)
+      ) | U(
+        0,
+        log2Up(packetLenMax) bits
+      )) + ((io.metaIn.dataLen + HEADER_TOTAL_LENGTH) >> 5)
         .takeLow(log2Up(packetLenMax))
         .asUInt - 1
     }
   } elsewhen (io.headerAxisOut.lastFire & needFragment) {
-    when(metaRegs.dataLen > 1480) {
+    when(metaRegs.dataLen > MAX_DATA_NUM) {
       needFragment := True
-      ipLenReg := 1500
-      metaRegs.dataLen := metaRegs.dataLen - 1480
-      packetLen := 48 - 1
+      ipLenReg := IP_LENGTH_MAX
+      metaRegs.dataLen := metaRegs.dataLen - MAX_DATA_NUM
+      packetLen := packetLenMax - 1
     } otherwise {
       needFragment := False
-      ipLenReg := metaRegs.dataLen.resize(16) + 20
-      packetLen := ((((io.metaIn.dataLen + 34) % HeaderGeneratorConfig.DATA_BYTE_CNT) =/= 0) ? U(
+      ipLenReg := io.metaIn.dataLen.resize(
+        IP_LENGTH_WIDTH
+      ) + IP_HEADER_LENGTH + UDP_HEADER_LENGTH
+      udpLenReg := io.metaIn.dataLen.resize(IP_LENGTH_WIDTH) + UDP_HEADER_LENGTH
+      packetLen := ((((io.metaIn.dataLen + HEADER_TOTAL_LENGTH) % HeaderGeneratorConfig.DATA_BYTE_CNT) =/= 0) ? U(
         1,
         log2Up(packetLenMax) bits
-      ) | U(0, log2Up(packetLenMax) bits)) + ((io.metaIn.dataLen + 42) >> 5)
+      ) | U(
+        0,
+        log2Up(packetLenMax) bits
+      )) + ((io.metaIn.dataLen + HEADER_TOTAL_LENGTH) >> 5)
         .takeLow(log2Up(packetLenMax))
         .asUInt - 1
     }
@@ -146,63 +157,38 @@ class HeaderGenerator(
   val ethIpHeader = generate(Seq(ethHeader, ipv4Header))
   val udpSent = Reg(Bool()) init False
 
-  when(!udpSent) {
+  io.headerAxisOut.data := sendingCnt.mux(
+    0 -> ethIpUdpHeader(sendingCnt),
+    1 -> ethIpUdpHeader(sendingCnt).rotateRight(sendHeaderLastLeft * BYTE_WIDTH)
+  )
 
-    io.headerAxisOut.data := sendingCnt.mux(
-      0 -> ethIpUdpHeader(sendingCnt),
-      1 -> ethIpUdpHeader(sendingCnt).rotateRight(sendHeaderLastLeft * BYTE_WIDTH)
+  //  32'xffff_ffff or 32'xffc0_0000
+  io.headerAxisOut.keep := sendingCnt.mux(
+    0 -> Bits(HeaderGeneratorConfig.DATA_BYTE_CNT bits).setAll(),
+    1 -> B(
+      HeaderGeneratorConfig.DATA_BYTE_CNT bits,
+      (HeaderGeneratorConfig.DATA_BYTE_CNT - 1 downto HeaderGeneratorConfig.DATA_BYTE_CNT - sendHeaderLastLeft) -> true,
+      default -> false
     )
+  )
 
-    //  32'xffff_ffff or 32'xffc0_0000
-    io.headerAxisOut.keep := sendingCnt.mux(
-      0 -> Bits(HeaderGeneratorConfig.DATA_BYTE_CNT bits).setAll(),
-      1 -> B(
-        HeaderGeneratorConfig.DATA_BYTE_CNT bits,
-        (HeaderGeneratorConfig.DATA_BYTE_CNT - 1 downto HeaderGeneratorConfig.DATA_BYTE_CNT - sendHeaderLastLeft) -> true,
-        default -> false
-      )
-    )
-
-    io.headerAxisOut.user := (sendingCnt.value % 2 === 0) ?
-      generateControlSignal(0, True, packetLen) | generateControlSignal(
-      sendHeaderLastLeft,
-        False,
-        packetLen
-      )
-  } otherwise {
-    io.headerAxisOut.data := (sendingCnt.value % 2 === 0) ?
-      ethIpHeader(sendingCnt) |
-      ethIpHeader(sendingCnt).rotateRight(
-        sendHeaderLastLeft * BYTE_WIDTH
-      )
-    //  32'xffff_ffff or 32'xc000_0000
-    io.headerAxisOut.keep := (sendingCnt.value % 2 === 0) ?
-      Bits(HeaderGeneratorConfig.DATA_BYTE_CNT bits).setAll() |
-      B(
-        HeaderGeneratorConfig.DATA_BYTE_CNT bits,
-        (HeaderGeneratorConfig.DATA_BYTE_CNT - 1 downto HeaderGeneratorConfig.DATA_BYTE_CNT - sendHeaderLastLeft) -> true,
-        default -> false
-      )
-    io.headerAxisOut.user := (sendingCnt.value % 2 === 0) ?
-      generateControlSignal(0, True, packetLen) | generateControlSignal(
-        2,
-        False,
-        packetLen
-      )
-  }
+  io.headerAxisOut.user := sendingCnt.mux(
+    0 -> generateControlSignal(0, True, packetLen),
+    1 -> generateControlSignal(sendHeaderLastLeft, False, packetLen)
+  )
 
   io.headerAxisOut.valid := dataLoaded
   when(io.headerAxisOut.fire) {
     sendingCnt.increment()
-    when(sendingCnt.value % 2 === 1) {
+    when(sendingCnt.lsb) {
       io.headerAxisOut.last := True
     } otherwise {
       io.headerAxisOut.last := False
     }
-    when(sendingCnt.value === 1 & needFragment) {
+    when(sendingCnt.lsb & needFragment) {
       udpSent := True
       generateDone := False
-    } elsewhen (sendingCnt.value === 1 & !needFragment) {
+    } elsewhen (sendingCnt.lsb & !needFragment) {
       generateDone := True
       udpSent := False
     } otherwise {
@@ -255,7 +241,7 @@ class HeaderGenerator(
   ): Bits = {
     val controlHeader = B"8'xa5"
     val controlTail = B"8'x5a"
-    val shiftBits = B(shiftLen, 5 bits)
+    val shiftBits = B(shiftLen, log2Up(DATA_BYTE_CNT) bits)
     val ret = controlTail ## B(0, 4 bits) ##
       packetLen ## lastSelect ## shiftBits ## controlHeader
     ret
