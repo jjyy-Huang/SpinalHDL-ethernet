@@ -28,7 +28,7 @@ There is the specification of Rx I/O:
 | IO name     | direction | type                                   | description                                              |
 |-------------|-----------|----------------------------------------|----------------------------------------------------------|
 | dataAxisIn  | slave     | Stream(Axi4StreamBundle)[tKeep, tLast] | Stream of ethernet frame packet                          |
-| metaOut     | master    | Stream(MetaInterface)                  | Stream of meta to config the following transaction       |
+| metaOut     | master    | Stream(MetaInterface)                  | Stream of meta of this  transaction                      |
 | dataAxisOut | master    | Stream(Axi4StreamBundle)[tKeep, tLast] | Stream of data which has unpacked from ethernet protocol |
 
 
