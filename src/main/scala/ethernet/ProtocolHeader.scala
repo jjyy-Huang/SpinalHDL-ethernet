@@ -1,5 +1,6 @@
 package ethernet
 
+import ethernet.UserConfiguration._
 import spinal.core._
 
 import scala.collection.mutable
@@ -20,6 +21,9 @@ object EthernetProtocolConstant {
   val ETH_HEADER_LENGTH = 14
   val IP_HEADER_LENGTH = 20
   val UDP_HEADER_LENGTH = 8
+  val ETH_HEADER_WIDTH = ETH_HEADER_LENGTH * BYTE_WIDTH
+  val IP_HEADER_WIDTH = IP_HEADER_LENGTH * BYTE_WIDTH
+  val UDP_HEADER_WIDTH = UDP_HEADER_LENGTH * BYTE_WIDTH
   val HEADER_TOTAL_LENGTH =
     ETH_HEADER_LENGTH + IP_HEADER_LENGTH + UDP_HEADER_LENGTH
 
