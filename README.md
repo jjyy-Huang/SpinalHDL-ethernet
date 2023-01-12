@@ -28,11 +28,11 @@ There is the specification of Rx I/O:
 | IO name     | direction | type                                   | description                                              |
 |-------------|-----------|----------------------------------------|----------------------------------------------------------|
 | dataAxisIn  | slave     | Stream(Axi4StreamBundle)[tKeep, tLast] | Stream of ethernet frame packet                          |
-| metaOut     | master    | Stream(MetaInterface)                  | Stream of meta of this  transaction                      |
+| metaOut     | master    | Stream(MetaInterface)                  | Stream of meta about this transaction                    |
 | dataAxisOut | master    | Stream(Axi4StreamBundle)[tKeep, tLast] | Stream of data which has unpacked from ethernet protocol |
 
 ## A Simple Verification
-![](.pic/txwave.png)
+![](.pic/txwave.png) 
 
 ## TODO
 - Redesign Rx module control logic
