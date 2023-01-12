@@ -95,7 +95,6 @@ class HeaderGenerator(HeaderGeneratorConfig: HeaderGeneratorGenerics) extends Co
     metaRegs.dstMacAddr := io.metaIn.dstMacAddr
     metaRegs.srcIpAddr := io.metaIn.srcIpAddr
     metaRegs.srcMacAddr := io.metaIn.srcMacAddr
-    metaRegs.needUdpChecksum := io.metaIn.needUdpChecksum
   }
 
   when(io.metaIn.fire) {    // first load metadata
@@ -157,7 +156,7 @@ class HeaderGenerator(HeaderGeneratorConfig: HeaderGeneratorGenerics) extends Co
       metaRegs.srcPort,
       metaRegs.dstPort,
       udpLenReg.asBits,
-      metaRegs.needUdpChecksum ? B(0, UDP_CHECKSUM_WIDTH bits) | B(0, UDP_CHECKSUM_WIDTH bits) // udpChecksum or 0x0000
+      0 // udpChecksum not support now
     )
   )
 
