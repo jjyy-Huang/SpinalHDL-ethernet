@@ -5,12 +5,6 @@ import spinal.core._
 import scala.collection.mutable
 
 object EthernetProtocolConstant {
-  val DATA_WIDTH = 256
-  val BYTE_WIDTH = 8
-  val DATA_BYTE_CNT = DATA_WIDTH / BYTE_WIDTH
-
-  val SRC_MAC_ADDR = 0x0123456789abcL
-  val SRC_IP_ADDR = 0xc0a80101L
 
   val ETH_TYPE = 0x0800
   val IP_VERSION = 0x4
