@@ -22,7 +22,6 @@ object EthernetProtocolConstant {
   val TTL = 0x40
   val PROTOCOL = 0x11
 
-  val UDP_CHECKSUM = 0x0000
 
   val ETH_HEADER_LENGTH = 14
   val IP_HEADER_LENGTH = 20
@@ -35,8 +34,7 @@ object EthernetProtocolConstant {
   val UDP_LENGTH_MAX = IP_LENGTH_MAX - IP_HEADER_LENGTH
 
   val MAX_DATA_NUM = MTU - IP_HEADER_LENGTH - UDP_HEADER_LENGTH
-  val MIN_DATA_NUM =
-    22 // MIN_TRANSACTION_NUM(64) - MAC_LEN(14) - IP_LEN(20) - UDP_LEN(8)
+  val MIN_DATA_NUM = 22 // MIN_TRANSACTION_NUM(64) - MAC_LEN(14) - IP_LEN(20) - UDP_LEN(8)
 
   val MAC_ADDR_WIDTH = 48
   val ETH_TYPE_WIDTH = 16
@@ -58,10 +56,8 @@ object EthernetProtocolConstant {
   val UDP_LENGTH_WIDTH = 16
   val UDP_CHECKSUM_WIDTH = 16
 }
-case class EthernetProtocolHeaderConstructor(
-    initField: mutable.LinkedHashMap[String, Int]
-) extends Bundle {
-  def constructHeader(): Array[Bits] = {
+class EthernetProtocolHeaderConstructor {
+  def constructHeader(initField: mutable.LinkedHashMap[String, Int]): Array[Bits] = {
     val fieldName: Array[String] = initField.keys.toArray
     val fieldWidth: Array[Int] = initField.values.toArray
     val protocolField = List.tabulate[Bits](initField.size) { index =>
@@ -73,56 +69,36 @@ case class EthernetProtocolHeaderConstructor(
   }
 
 }
-// interface workshop
-trait FrameHeader {
+trait FrameHeader extends EthernetProtocolHeaderConstructor {
   val frameFieldInit: mutable.LinkedHashMap[String, Int]
   val header: Array[Bits]
 }
 
-//object ARPHeader {
-//  def apply(array: Array[Bits]): Array[Bits] = {
-//    val gen = new ARPHeader
-//    require(
-//      array.length == gen.header.length,
-//      s"Initializing parameters not enough! Require ${gen.header.length} but gave ${array.length}"
-//    )
-//    gen.header.zipWithIndex.foreach { case (data, idx) =>
-//      data := array(idx)
-//    }
-//    gen.header
-//  }
-//
-//  def unapply(header: Bits): (Array[String], Array[Bits]) = {
-//    val gen = new ARPHeader
-//    val bitWidth = gen.frameFieldInit.values.sum
-//    require(
-//      bitWidth == header.getWidth,
-//      s"Initializing parameters not enough! Require ${bitWidth} but gave ${header.getWidth}"
-//    )
-//    val asLittleEnd = header.subdivideIn(bitWidth / 8 slices).reduce(_ ## _)
-//    val tmp = asLittleEnd
-//      .sliceBy(gen.frameFieldInit.values.toList.reverse)
-//      .reverse
-//      .toArray
-//    gen.header.zipWithIndex.foreach { case (data, idx) =>
-//      data := tmp(idx)
-//    }
-//    (gen.frameFieldInit.keys.toArray, gen.header)
-//  }
-//}
-//
-//case class ARPHeader() extends FrameHeader {
-//  val frameFieldInit = mutable.LinkedHashMap(
-//    "hardwareType" -> 2 * 8,
-//    "protocolType" -> 2 * 8,
-//    "hardwareLen" -> 8,
-//    "protocolLen" -> 8,
-//    "operation" -> 2 * 8,
-//    "senderHardwareAddr" -> 6 * 8,
-//    "senderProtocolAddr" -> 4 * 8,
-//    "targetHardwareAddr" -> 6 * 8,
-//    "targetProtocolAddr" -> 4 * 8
-//  )
-//  val header: Array[Bits] =
-//    EthernetProtocolHeaderConstructor(frameFieldInit).constructHeader()
-//}
+class HeaderOperate {
+  def generate(array: Array[Bits], gen: FrameHeader): Array[Bits] = {
+    require(
+      array.length == gen.header.length,
+      s"Initializing parameters not enough! Require ${gen.header.length} but gave ${array.length}"
+    )
+    gen.header.zipWithIndex.foreach { case (data, idx) =>
+      data := array(idx)
+    }
+    gen.header
+  }
+  def extract(header: Bits, extract: FrameHeader): (Array[String], Array[Bits]) = {
+    val bitWidth = extract.frameFieldInit.values.sum
+    require(
+      bitWidth == header.getWidth,
+      s"Initializing parameters not enough! Require ${bitWidth} but gave ${header.getWidth}"
+    )
+    val asLittleEnd = header.subdivideIn(bitWidth / 8 slices).reduce(_ ## _)
+    val tmp = asLittleEnd
+      .sliceBy(extract.frameFieldInit.values.toList.reverse)
+      .reverse
+      .toArray
+    extract.header.zipWithIndex.foreach { case (data, idx) =>
+      data := tmp(idx)
+    }
+    (extract.frameFieldInit.keys.toArray, extract.header)
+  }
+}

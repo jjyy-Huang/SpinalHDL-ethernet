@@ -34,7 +34,7 @@ class RxTop(
   val io = new Bundle {
 
     val dataAxisIn = slave(Axi4Stream(dataAxisCfg))
-    val metaOut = master Stream MetaInterface()
+    val metaOut = master Stream MetaData()
     val dataAxisOut = master(Axi4Stream(dataAxisCfg))
   }
 
