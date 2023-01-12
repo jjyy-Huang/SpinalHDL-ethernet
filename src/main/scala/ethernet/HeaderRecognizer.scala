@@ -85,31 +85,32 @@ class HeaderRecognizer(
   val packetLenWidth = log2Up(packetLenMax)
   val packetLenReg = Reg(UInt(log2Up(packetLenMax) bits)) init 0
 
-  val needOneMoreCycle = ((ipv4Header("ipLen").asUInt + ETH_HEADER_LENGTH) & (DATA_BYTE_CNT - 1)) =/= 0
+  val needOneMoreCycle = ((ipv4HeaderReg("ipLen").asUInt + ETH_HEADER_LENGTH) & (DATA_BYTE_CNT - 1)) =/= 0
 
   when(recognizerStart) {
     macAddrCorrectReg.setWhen(ethHeader("dstMAC") === B"48'xfccffccffccf")
-                      .clearWhen(io.dataAxisIn.lastFire)
     ipAddrCorrectReg.setWhen(ipv4Header("dstAddr") === B"32'xc0a80103")
-                     .clearWhen(io.dataAxisIn.lastFire)
     isIpReg.setWhen(ethHeader("ethType") === ETH_TYPE)
-            .clearWhen(io.dataAxisIn.lastFire)
     isUdpReg.setWhen(ipv4Header("protocol") === PROTOCOL)
-             .clearWhen(io.dataAxisIn.lastFire)
   }
+
+  macAddrCorrectReg.clearWhen(packetStreamReg.lastFire)
+  ipAddrCorrectReg.clearWhen(packetStreamReg.lastFire)
+  isIpReg.clearWhen(packetStreamReg.lastFire)
+  isUdpReg.clearWhen(packetStreamReg.lastFire)
 
   when(recognizerRunning) {
     when(headerMatch) {
       dataLen := (ipv4HeaderReg("ipLen").asUInt - (IP_HEADER_LENGTH + UDP_HEADER_LENGTH)).resized
       shiftLen := DATA_BYTE_CNT - (HEADER_TOTAL_LENGTH % DATA_BYTE_CNT)
-      packetLenReg := ((ipv4HeaderReg("ipLen").asUInt + ETH_HEADER_LENGTH) >> packetLenWidth
-        ).takeLow(packetLenWidth).asUInt +
-        (needOneMoreCycle ? U(1, packetLenWidth bits) | U(0, packetLenWidth bits))
+      packetLenReg := (ipv4HeaderReg("ipLen").asUInt - (IP_HEADER_LENGTH + UDP_HEADER_LENGTH) >> log2Up(DATA_BYTE_CNT)
+        ).takeLow(packetLenWidth).asUInt -
+        (needOneMoreCycle ? U(0, packetLenWidth bits) | U(1, packetLenWidth bits))
     }
   }
 
   val metaCfg = Stream(MetaData())
-  metaCfg.valid := RegNext(isUdpReg.rise) init False
+  metaCfg.valid := RegNext(headerMatch.rise()) init False
   metaCfg.dataLen := dataLen.resize(metaCfg.dataLen.getWidth)
   metaCfg.srcMacAddr := ethHeaderReg("srcMAC")
   metaCfg.srcIpAddr := ipv4HeaderReg("srcAddr")
@@ -127,14 +128,22 @@ class HeaderRecognizer(
   }
 
 
-  val dataStreamRegValid = (macAddrCorrectReg && recognizerRunning) | macAddrCorrectReg
-  val dataStreamValid = (macAddrCorrectReg && recognizerRunning)
+  val dataStreamRegValid = (headerMatch && recognizerRunning) | headerMatch
+  val dataStreamValid = (headerMatch && recognizerRunning)
 
-  val dataStreamReg = packetStreamReg takeWhen (dataStreamRegValid) stage ()
-  val dataStream = packetStream takeWhen (dataStreamValid) stage ()
-
+  val dataStreamReg = packetStreamReg takeWhen (dataStreamRegValid) m2sPipe() s2mPipe()
+  val dataStream = packetStream takeWhen (dataStreamValid) m2sPipe() s2mPipe()
+  val invalidReg = Reg(Bool()) init False
   val dataJoinStream =
-    Axi4StreamConditionalJoin(dataStreamReg, dataStream, True, True) stage ()
+    Axi4StreamConditionalJoin(dataStreamReg, dataStream, True, True) stage() throwWhen(invalidReg)
+
+  val transactionCounter = new StreamTransactionCounter(packetLenWidth)
+  transactionCounter.io.ctrlFire := RegNext(headerMatch.rise()) init False
+  transactionCounter.io.targetFire := dataJoinStream.fire
+  transactionCounter.io.count := packetLenReg  // 0 until packetLen
+  invalidReg := transactionCounter.io.done
+
+
   val maskStage = packetStream.clone()
   val mask =
     RegNextWhen(generateByteMask(shiftLen), headerMatch & dataStreamReg.fire) init 0
@@ -148,14 +157,16 @@ class HeaderRecognizer(
     ~mask,
     dataJoinStream.payload._1.keep
   ) | byteMaskData(mask, dataJoinStream.payload._2.keep)
-  maskStage.last := dataJoinStream.payload._1.last
+  maskStage.last := transactionCounter.io.done
 
-  val shiftStage = maskStage.clone()
-  shiftStage.arbitrationFrom(maskStage)
-  shiftStage.data := rotateLeftByte(maskStage.data, shiftLen)
-  shiftStage.keep := rotateLeftBit(maskStage.keep, shiftLen)
+  val maskedStage = maskStage m2sPipe() s2mPipe()
+
+  val shiftStage = maskedStage.clone()
+  shiftStage.arbitrationFrom(maskedStage)
+  shiftStage.data := rotateLeftByte(maskedStage.data, shiftLen)
+  shiftStage.keep := rotateLeftBit(maskedStage.keep, shiftLen)
   shiftStage.user := 0
-  shiftStage.last := maskStage.last
+  shiftStage.last := maskedStage.last
 
   io.dataAxisOut << shiftStage
 }
