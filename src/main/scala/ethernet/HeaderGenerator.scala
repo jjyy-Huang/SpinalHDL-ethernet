@@ -128,14 +128,15 @@ class HeaderGenerator(HeaderGeneratorConfig: HeaderGeneratorGenerics) extends Co
 
 
   val ethHeader = EthernetHeader(
-    Array(
+    Seq(
       metaRegs.dstMacAddr,
       metaRegs.srcMacAddr,
       ETH_TYPE
     )
   )
   val ipv4Header = IPv4Header(
-    Array(
+//    Seq   ->   List
+    Seq(
       IP_VERSION,
       IHL,
       DSCP,
@@ -152,7 +153,7 @@ class HeaderGenerator(HeaderGeneratorConfig: HeaderGeneratorGenerics) extends Co
     )
   )
   val udpHeader = UDPHeader(
-    Array(
+    Seq(
       metaRegs.srcPort,
       metaRegs.dstPort,
       udpLenReg.asBits,
@@ -205,7 +206,7 @@ class HeaderGenerator(HeaderGeneratorConfig: HeaderGeneratorGenerics) extends Co
     generateDone := False
   }
 
-  def mergeHeader(header: Seq[Array[Bits]]): Vec[Bits] = {
+  def mergeHeader(header: Seq[Seq[Bits]]): Vec[Bits] = {
     val headerWidth: Int = header.flatten.map(_.getWidth).sum
     val filledHeaderWidth = ((headerWidth / DATA_WIDTH.toFloat).ceil * DATA_WIDTH).toInt
     val tmp = header.flatten

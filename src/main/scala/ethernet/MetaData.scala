@@ -20,6 +20,4 @@ case class MetaData() extends Bundle {
   val dstPort = Bits(UDP_PORT_WIDTH bits)
   val srcPort = Bits(UDP_PORT_WIDTH bits)
 
-  //  checksum option
-//  val needUdpChecksum = Bool() // not support now -> always False
 }

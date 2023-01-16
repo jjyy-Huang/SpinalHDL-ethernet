@@ -73,17 +73,17 @@ trait FrameHeader extends EthernetProtocolHeaderConstructor {
 }
 
 class HeaderOperate {
-  def generate(array: Array[Bits], gen: FrameHeader): Array[Bits] = {
+  def generate(arr: Seq[Bits], gen: FrameHeader): Seq[Bits] = {
     require(
-      array.length == gen.header.length,
-      s"Initializing parameters not enough! Require ${gen.header.length} but gave ${array.length}"
+      arr.length == gen.header.length,
+      s"Initializing parameters not enough! Require ${gen.header.length} but gave ${arr.length}"
     )
     gen.header.zipWithIndex.foreach { case (data, idx) =>
-      data := array(idx)
+      data := arr(idx)
     }
     gen.header
   }
-  def extract(header: Bits, extract: FrameHeader): (Array[String], Array[Bits]) = {
+  def extract(header: Bits, extract: FrameHeader): (Seq[String], Seq[Bits]) = {
     val bitWidth = extract.frameFieldInit.values.sum
     require(
       bitWidth == header.getWidth,
@@ -97,6 +97,6 @@ class HeaderOperate {
     extract.header.zipWithIndex.foreach { case (data, idx) =>
       data := tmp(idx)
     }
-    (extract.frameFieldInit.keys.toArray, extract.header)
+    (extract.frameFieldInit.keys.toSeq, extract.header)
   }
 }

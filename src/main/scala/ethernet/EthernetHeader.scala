@@ -6,11 +6,11 @@ import EthernetProtocolConstant._
 import scala.collection.mutable
 
 object EthernetHeader extends HeaderOperate{
-  def apply(array: Array[Bits]): Array[Bits] = {
+  def apply(array: Seq[Bits]): Seq[Bits] = {
     val gen = EthernetHeader()
     this.generate(array, gen)
   }
-  def unapply(header: Bits): (Array[String], Array[Bits]) = {
+  def unapply(header: Bits): (Seq[String], Seq[Bits]) = {
     val extract = EthernetHeader()
     this.extract(header, extract)
   }

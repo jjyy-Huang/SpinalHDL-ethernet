@@ -1,4 +1,4 @@
-package ethernet
+package teststream
 
 import spinal.core._
 import spinal.core.sim._

@@ -6,11 +6,11 @@ import spinal.core._
 import scala.collection.mutable
 
 object IPv4Header extends HeaderOperate {
-  def apply(array: Array[Bits]): Array[Bits] = {
+  def apply(array: Seq[Bits]): Seq[Bits] = {
     val gen = IPv4Header()
     this.generate(array, gen)
   }
-  def unapply(header: Bits): (Array[String], Array[Bits]) = {
+  def unapply(header: Bits): (Seq[String], Seq[Bits]) = {
     val extract = IPv4Header()
     this.extract(header, extract)
   }
