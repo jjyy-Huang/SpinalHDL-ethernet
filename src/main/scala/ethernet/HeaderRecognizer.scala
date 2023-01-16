@@ -85,11 +85,11 @@ class HeaderRecognizer(
   val packetLenWidth = log2Up(packetLenMax)
   val packetLenReg = Reg(UInt(log2Up(packetLenMax) bits)) init 0
 
-  val needOneMoreCycle = ((ipv4HeaderReg("ipLen").asUInt + ETH_HEADER_LENGTH) & (DATA_BYTE_CNT - 1)) =/= 0
+  val needOneMoreCycle = ((ipv4HeaderReg("ipLen").asUInt - (IP_HEADER_LENGTH + UDP_HEADER_LENGTH)) & (DATA_BYTE_CNT - 1)) =/= 0
 
   when(recognizerStart) {
-    macAddrCorrectReg.setWhen(ethHeader("dstMAC") === B"48'xfccffccffccf")
-    ipAddrCorrectReg.setWhen(ipv4Header("dstAddr") === B"32'xc0a80103")
+    macAddrCorrectReg.setWhen(ethHeader("dstMAC") === B"48'xfccffccffccf")  // just use verification
+    ipAddrCorrectReg.setWhen(ipv4Header("dstAddr") === B"32'xc0a80103")     // just use verification
     isIpReg.setWhen(ethHeader("ethType") === ETH_TYPE)
     isUdpReg.setWhen(ipv4Header("protocol") === PROTOCOL)
   }
@@ -99,14 +99,12 @@ class HeaderRecognizer(
   isIpReg.clearWhen(packetStreamReg.lastFire)
   isUdpReg.clearWhen(packetStreamReg.lastFire)
 
-  when(recognizerRunning) {
-    when(headerMatch) {
-      dataLen := (ipv4HeaderReg("ipLen").asUInt - (IP_HEADER_LENGTH + UDP_HEADER_LENGTH)).resized
-      shiftLen := DATA_BYTE_CNT - (HEADER_TOTAL_LENGTH % DATA_BYTE_CNT)
-      packetLenReg := (ipv4HeaderReg("ipLen").asUInt - (IP_HEADER_LENGTH + UDP_HEADER_LENGTH) >> log2Up(DATA_BYTE_CNT)
-        ).takeLow(packetLenWidth).asUInt -
-        (needOneMoreCycle ? U(0, packetLenWidth bits) | U(1, packetLenWidth bits))
-    }
+  when(headerMatch) {
+    dataLen := (ipv4HeaderReg("ipLen").asUInt - (IP_HEADER_LENGTH + UDP_HEADER_LENGTH)).resized
+    shiftLen := DATA_BYTE_CNT - (HEADER_TOTAL_LENGTH % DATA_BYTE_CNT)
+    packetLenReg := ((ipv4HeaderReg("ipLen").asUInt - (IP_HEADER_LENGTH + UDP_HEADER_LENGTH)) >> log2Up(DATA_BYTE_CNT)
+      ).takeLow(packetLenWidth).asUInt -
+      (needOneMoreCycle ? U(0, packetLenWidth bits) | U(1, packetLenWidth bits))
   }
 
   val metaCfg = Stream(MetaData())
