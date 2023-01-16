@@ -1,11 +1,9 @@
-package ethernet
+package teststream
 
+import ethernet._
 import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba4.axis._
-
-import EthernetProtocolConstant._
-import UserConfiguration._
 
 class Loopback(txConfig: TxGenerics,
                headerGenerateConfig: HeaderGeneratorGenerics,
