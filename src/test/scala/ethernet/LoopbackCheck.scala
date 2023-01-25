@@ -3,9 +3,8 @@ package ethernet
 import spinal.core._
 import spinal.core.sim._
 import spinal.lib._
-import spinal.lib.bus.amba4.axis.Axi4Stream
+import spinal.lib.bus.amba4.axis._
 import spinal.lib.sim._
-import teststream.Loopback
 
 import java.util.Calendar
 import scala.collection.mutable
@@ -84,7 +83,7 @@ object LoopbackCheckSim extends App {
       }
 
       initPort()
-      dut.clockDomain.waitRisingEdge(50)
+      dut.clockDomain.waitSampling(50)
 
       println("init monitor")
       def monitor(): Unit = {
@@ -101,7 +100,7 @@ object LoopbackCheckSim extends App {
             println(f"ref: $refAppend, res: $resAppend")
             assert(refAppend == resAppend, s"require ${refAppend}, but return ${resAppend}")
           }
-          dut.clockDomain.waitRisingEdge()
+          dut.clockDomain.waitSampling()
         }
       }
       val enaMonitor = fork {
@@ -128,7 +127,7 @@ object LoopbackCheckSim extends App {
         }
         a.join()
         b.join()
-        dut.clockDomain.waitRisingEdge(Random.nextInt(20).abs)
+        dut.clockDomain.waitSampling(Random.nextInt(20).abs)
       }
 
       def loadMeta(sendDataBytes: Int): Unit = {
@@ -140,7 +139,7 @@ object LoopbackCheckSim extends App {
         dut.io.metaIn.payload.srcPort #= simCfg.srcPort.asHex
         dut.io.metaIn.payload.dataLen #= sendDataBytes
         dut.io.metaIn.valid #= true
-        dut.clockDomain.waitRisingEdge()
+        dut.clockDomain.waitSampling()
         dut.io.metaIn.valid #= false
       }
       def loadData(sendDataBytes: Int): Unit = {
@@ -164,7 +163,7 @@ object LoopbackCheckSim extends App {
             dut.io.dataAxisIn.keep #= (pow(2, 32) - 1).toLong.abs
             dataQueue.enqueue(randData)
           }
-          dut.clockDomain.waitRisingEdge()
+          dut.clockDomain.waitSampling()
           dut.io.dataAxisIn.data #= 0
           dut.io.dataAxisIn.valid #= false
           dut.io.dataAxisIn.last #= false
@@ -172,7 +171,50 @@ object LoopbackCheckSim extends App {
         }
       }
 
-      dut.clockDomain.waitRisingEdge(50)
+      dut.clockDomain.waitSampling(50)
       simSuccess()
     }
+}
+
+class Loopback(txConfig: TxGenerics,
+               headerGenerateConfig: HeaderGeneratorGenerics,
+               rxConfig: RxGenerics,
+               headerRecognizeConfig: HeaderRecognizerGenerics) extends Component {
+
+  val dataAxisInCfg = Axi4StreamConfig(
+    dataWidth = txConfig.DATA_BYTE_CNT,
+    userWidth = txConfig.DATA_TUSER_WIDTH,
+    useStrb = txConfig.DATA_USE_TSTRB,
+    useKeep = txConfig.DATA_USE_TKEEP,
+    useLast = txConfig.DATA_USE_TLAST,
+    useUser = txConfig.DATA_USE_TUSER
+  )
+
+  val dataAxisOutCfg = Axi4StreamConfig(
+    dataWidth = rxConfig.DATA_BYTE_CNT,
+    userWidth = rxConfig.DATA_TUSER_WIDTH,
+    useStrb = rxConfig.DATA_USE_TSTRB,
+    useKeep = rxConfig.DATA_USE_TKEEP,
+    useLast = rxConfig.DATA_USE_TLAST,
+    useUser = rxConfig.DATA_USE_TUSER
+  )
+
+  val io = new Bundle {
+    val metaIn = slave Stream MetaData()
+    val dataAxisIn = slave(Axi4Stream(dataAxisInCfg))
+
+    val metaOut = master Stream MetaData()
+    val dataAxisOut = master(Axi4Stream(dataAxisOutCfg))
+  }
+
+  val tx = new TxTop(txConfig, headerGenerateConfig)
+  val rx = new RxTop(rxConfig, headerRecognizeConfig)
+
+  tx.io.metaIn << io.metaIn
+  tx.io.dataAxisIn << io.dataAxisIn
+
+  rx.io.dataAxisIn << tx.io.dataAxisOut
+
+  io.dataAxisOut << rx.io.dataAxisOut
+  io.metaOut << rx.io.metaOut
 }
