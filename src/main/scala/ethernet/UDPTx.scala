@@ -55,10 +55,9 @@ class TxTop(txConfig: TxGenerics, headerConfig: HeaderGeneratorGenerics) extends
   val selectedStream = StreamMux(streamMuxReg, Vec(headerBuffered, dataBufferedReg)
                         ).s2mPipe() throwWhen(invalidData)
 
-  val joinedStream = Axi4StreamConditionalJoin(
+  val joinedStream = SubStreamJoin(
     selectedStream,
-    forkedStream(1),
-    streamJoinReg0,
+    StreamPayloadResetIfInvalid(forkedStream(1)),
     streamJoinReg1
   ) m2sPipe ()
 
