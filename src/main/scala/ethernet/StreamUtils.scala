@@ -11,8 +11,8 @@ object SubStreamJoin {
       sub.payloadType
     ))
     combined.valid := withSub ? (main.valid && sub.valid) | main.valid
-    main.ready := combined.fire
-    sub.ready := withSub ? combined.fire | False
+    main.ready := combined.ready
+    sub.ready := withSub ? combined.ready | False
     combined.payload._1 := main.payload
     combined.payload._2 := sub.payload
     combined
@@ -22,7 +22,7 @@ object StreamPayloadResetIfInvalid {
   def apply[T <: Data](s: Stream[T]): Stream[T] = {
     val resetStream = s.clone()
     resetStream.arbitrationFrom(s)
-    resetStream.payload.flatten.zipWithIndex.map { case (payload, idx) =>
+    resetStream.payload.flatten.zipWithIndex.foreach { case (payload, idx) =>
       when(!s.valid) {
         if (payload.getTypeObject == TypeBool) {
           payload := False
