@@ -35,36 +35,38 @@ class TxTop(txConfig: TxGenerics, headerConfig: HeaderGeneratorGenerics) extends
     val dataAxisOut = master(Axi4Stream(dataAxisCfg))
   }
 
-  val dataBuffered = io.dataAxisIn.queue(txConfig.DATA_BUFFER_DEPTH)
+  val dataBuffered = StreamPayloadResetIfInvalid(io.dataAxisIn.queue(txConfig.DATA_BUFFER_DEPTH))
   val metaBuffered = io.metaIn.queue(headerConfig.INPUT_BUFFER_DEPTH)
 
   val headerGenerator = new HeaderGenerator(headerConfig)
   headerGenerator.io.metaIn << metaBuffered
 
-  val headerBuffered = headerGenerator.io.headerAxisOut.queue(txConfig.HEADER_BUFFER_DEPTH)
+  val headerBuffered = StreamPayloadResetIfInvalid(headerGenerator.io.headerAxisOut.queue(txConfig.HEADER_BUFFER_DEPTH))
 
+  val invalidData = Bool()
   val forkedStream = StreamFork(dataBuffered, 2)
-  val dataBufferedReg = forkedStream(0).stage()
+  val dataBufferedReg = forkedStream(0) stage()
+  val subStream = forkedStream(1) combStage()
 
   val streamMuxReg = Reg(UInt(1 bits)) init 0
   val streamJoinReg0 = Reg(Bool()) init False
-  val streamJoinReg1 = Reg(Bool()) init False
+  val withSubStreamReg = Reg(Bool()) init False
+  val withSubStream = withSubStreamReg || headerBuffered.lastFire
 
-  val invalidData = Bool()
 
   val selectedStream = StreamMux(streamMuxReg, Vec(headerBuffered, dataBufferedReg)
-                        ).s2mPipe() throwWhen(invalidData)
+                        ) throwWhen(invalidData)
 
   val joinedStream = SubStreamJoin(
-    selectedStream,
-    StreamPayloadResetIfInvalid(forkedStream(1)),
-    streamJoinReg1
+    StreamPayloadResetIfInvalid(selectedStream),
+    subStream,
+    withSubStream
   ) m2sPipe ()
 
   when(forkedStream(1).lastFire) {
-    streamJoinReg1 := False
-  } elsewhen (selectedStream.fire & !streamMuxReg.asBool) {
-    streamJoinReg1 := True
+    withSubStreamReg := False
+  } elsewhen (headerBuffered.lastFire.rise()) {
+    withSubStreamReg := True
   }
 
   when(headerBuffered.lastFire) {
@@ -80,21 +82,17 @@ class TxTop(txConfig: TxGenerics, headerConfig: HeaderGeneratorGenerics) extends
   }
 
   val maskReg = Reg(Bits(DATA_BYTE_CNT bits)) init 0
-  val shiftLenReg = Reg(UInt(log2Up(DATA_BYTE_CNT) bits)) init 0
+  val shiftLenReg = Reg(UInt(CONTROL_SHIFT_WIDTH bits)) init 0
   val packetLen = selectedStream.user(CONTROL_PACKETLEN_RANGE).asUInt - 1 // 0 until packetLen
 
   val maskStage = dataBufferedReg.clone()
   val isUserCmd =
-    (selectedStream.user(CONTROL_HEADER_RANGE) === CONTROL_HEADER) &&
-      (selectedStream.user(CONTROL_TAIL_RANGE) === CONTROL_TAIL)
-  val cntTrigger = selectedStream.fire && isUserCmd &&
-    selectedStream.user(CONTROL_LSEL_RANGE).asBool
+    (selectedStream.user(CONTROL_HEADER_RANGE) === CONTROL_HEADER)
+  val cntTrigger = headerBuffered.lastFire
 
-  when(selectedStream.fire) {
-    when(isUserCmd) {
-      maskReg := generateByteMask(selectedStream.user(CONTROL_SHIFT_RANGE).asUInt)
-      shiftLenReg := selectedStream.user(CONTROL_SHIFT_RANGE).asUInt
-    }
+  when(selectedStream.fire & isUserCmd) {
+    maskReg := generateByteMask(selectedStream.user(CONTROL_SHIFT_RANGE).asUInt)
+    shiftLenReg := selectedStream.user(CONTROL_SHIFT_RANGE).asUInt
   }
   val tCntMaxWidth = log2Up((MTU + ETH_HEADER_LENGTH) / DATA_BYTE_CNT)
   val transactionCounter = new StreamTransactionCounter(tCntMaxWidth)

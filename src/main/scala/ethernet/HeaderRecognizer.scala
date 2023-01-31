@@ -8,8 +8,8 @@ import EthernetProtocolConstant._
 import UserConfiguration._
 
 case class HeaderRecognizerGenerics(
-    DATA_WIDTH: Int = 256,
-    DATA_BYTE_CNT: Int = 32,
+    DATA_WIDTH: Int = DATA_WIDTH,
+    DATA_BYTE_CNT: Int = DATA_BYTE_CNT,
     OCTETS: Int = 8,
     DATA_USE_TLAST: Boolean = true,
     DATA_USE_TUSER: Boolean = true,
@@ -47,12 +47,9 @@ class HeaderRecognizer(
 //  need redesign
   val restHeaderWidth = combineData.getWidth - HEADER_TOTAL_LENGTH * BYTE_WIDTH
   val splitHeader = combineData.sliceBy(List(ETH_HEADER_WIDTH, IP_HEADER_WIDTH, UDP_HEADER_WIDTH, restHeaderWidth))
-  val (ethHeaderName, ethHeaderExtract) =
-    EthernetHeader.unapply(splitHeader(0))
-  val (ipv4HeaderName, ipv4HeaderExtract) =
-    IPv4Header.unapply(splitHeader(1))
-  val (udpHeaderName, udpHeaderExtract) =
-    UDPHeader.unapply(splitHeader(2))
+  val (ethHeaderName, ethHeaderExtract) = EthernetHeader.unapply(splitHeader(0))
+  val (ipv4HeaderName, ipv4HeaderExtract) = IPv4Header.unapply(splitHeader(1))
+  val (udpHeaderName, udpHeaderExtract) = UDPHeader.unapply(splitHeader(2))
 
   val ethHeaderExtractReg = Array.tabulate(ethHeaderExtract.length) ( idx =>
     RegNextWhen(ethHeaderExtract(idx), setMeta)

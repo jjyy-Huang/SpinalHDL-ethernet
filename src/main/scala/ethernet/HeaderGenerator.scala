@@ -7,26 +7,22 @@ import spinal.core._
 import spinal.lib._
 import spinal.lib.bus.amba4.axis.{Axi4Stream, Axi4StreamConfig}
 
-/** 31  24      19          13     12      7    0
-  * ┌────┬──────┬───────────┬──────┬───────┬────┐
-  * │0x5A│      │ packetLen │ LSel │ Shift │0xA5│
-  * └────┴──────┴───────────┴──────┴───────┴────┘
+/** 15          8      5      4    0
+  * ┬───────────┬───────┬──────┬────┐
+  * │ packetLen │ Shift │ LSel │0x05│
+  * ┴───────────┴───────┴──────┴────┘
   */
 object HeaderGeneratorControlCmd {
-  val CONTROL_HEADER_RANGE = 7 downto 0
-  val CONTROL_TAIL_RANGE = 31 downto 24
+  val CONTROL_HEADER_RANGE = 3 downto 0
   val CONTROL_HEADER_WIDTH = CONTROL_HEADER_RANGE.length
-  val CONTROL_TAIL_WIDTH = CONTROL_TAIL_RANGE.length
-  val CONTROL_HEADER = 0xa5
-  val CONTROL_TAIL = 0x5a
-  val CONTROL_PACKETLEN_RANGE = 19 downto 14
+  val CONTROL_HEADER = 0x05
+  val CONTROL_PACKETLEN_RANGE = 15 downto (5+log2Up(DATA_BYTE_CNT))
   val CONTROL_PACKETLEN_WIDTH = CONTROL_PACKETLEN_RANGE.length
-  val CONTROL_LSEL_RANGE = 13 downto 13
-  val CONTROL_LSEL_WIDTH = CONTROL_LSEL_RANGE.length
-  val CONTROL_SHIFT_RANGE = 12 downto 8
+  val CONTROL_SHIFT_RANGE = (5+log2Up(DATA_BYTE_CNT)-1) downto 5
   val CONTROL_SHIFT_WIDTH = CONTROL_SHIFT_RANGE.length
+  val CONTROL_LSEL_RANGE = 4 downto 4
+  val CONTROL_LSEL_WIDTH = CONTROL_LSEL_RANGE.length
 
-  val CONTROL_FRAME_LEFT_WIDTH = 4
 }
 case class HeaderGeneratorGenerics(
     DATA_WIDTH: Int = DATA_WIDTH,
@@ -59,7 +55,7 @@ class HeaderGenerator(HeaderGeneratorConfig: HeaderGeneratorGenerics) extends Co
   val generateDone = Bool()
 
   val packetLenMax = ((MTU + ETH_HEADER_LENGTH) / DATA_BYTE_CNT.toFloat).ceil.toInt
-  val packetLenWidth = log2Up(packetLenMax)
+  val packetLenWidth = log2Up(packetLenMax+1)
   val packetLenReg = Reg(UInt(packetLenWidth bits)) init 0
 
   val dataLoadedReg = Reg(Bool()) init False
@@ -135,7 +131,6 @@ class HeaderGenerator(HeaderGeneratorConfig: HeaderGeneratorGenerics) extends Co
     )
   )
   val ipv4Header = IPv4Header(
-//    Seq   ->   List
     Seq(
       IP_VERSION,
       IHL,
@@ -163,39 +158,40 @@ class HeaderGenerator(HeaderGeneratorConfig: HeaderGeneratorGenerics) extends Co
 
   val ethIpUdpHeader = mergeHeader(Seq(ethHeader, ipv4Header, udpHeader))
 
-  io.headerAxisOut.data := sendingCnt.mux(
-    0 -> ethIpUdpHeader(sendingCnt),
-    1 -> ethIpUdpHeader(sendingCnt).rotateRight(sendHeaderLastLeft * BYTE_WIDTH)
-  )
-
-  //  32'xffff_ffff or 32'xffc0_0000
-  io.headerAxisOut.keep := sendingCnt.mux(
-    0 -> Bits(DATA_BYTE_CNT bits).setAll(),
-    1 -> B(
-      DATA_BYTE_CNT bits,
-      (DATA_BYTE_CNT - 1 downto DATA_BYTE_CNT - sendHeaderLastLeft) -> true,
-      default -> false
-    )
-  )
-
-  io.headerAxisOut.user := sendingCnt.mux(
-    0 -> generateControlSignal(0, True, packetLenReg),
-    1 -> generateControlSignal(sendHeaderLastLeft, False, packetLenReg)
-  )
+  switch(sendingCnt.value) {
+    sendingCnt.valueRange.foreach { idx =>
+      if ( idx == sendHeaderCycle-1 ) {
+        is(idx) {
+          io.headerAxisOut.data := ethIpUdpHeader(sendingCnt).rotateRight(sendHeaderLastLeft * BYTE_WIDTH)
+          io.headerAxisOut.keep := B(DATA_BYTE_CNT bits,
+            (DATA_BYTE_CNT - 1 downto DATA_BYTE_CNT - sendHeaderLastLeft) -> true,
+            default -> false
+          )
+          io.headerAxisOut.user := generateControlSignal(sendHeaderLastLeft, False, packetLenReg).resize(DATA_BYTE_CNT)
+        }
+      } else {
+        is(idx) {
+          io.headerAxisOut.data := ethIpUdpHeader(sendingCnt)
+          io.headerAxisOut.keep := Bits(DATA_BYTE_CNT bits).setAll()
+          io.headerAxisOut.user := generateControlSignal(0, True, packetLenReg).resize(DATA_BYTE_CNT)
+        }
+      }
+    }
+  }
 
   io.headerAxisOut.valid := dataLoadedReg
   when(io.headerAxisOut.fire) {
     sendingCnt.increment()
 
-    when(sendingCnt.lsb) {
+    when(sendingCnt.willOverflowIfInc) {
       io.headerAxisOut.last := True
     } otherwise {
       io.headerAxisOut.last := False
     }
 
-    when(sendingCnt.lsb & needFragment) {
+    when(sendingCnt.willOverflowIfInc & needFragment) {
       generateDone := False
-    } elsewhen (sendingCnt.lsb & !needFragment) {
+    } elsewhen (sendingCnt.willOverflowIfInc & !needFragment) {
       generateDone := True
     } otherwise {
       generateDone := False
@@ -220,15 +216,9 @@ class HeaderGenerator(HeaderGeneratorConfig: HeaderGeneratorGenerics) extends Co
 
   import HeaderGeneratorControlCmd._
   def generateControlSignal(shiftLen: Int, lastSelect: Bool, packetLen: UInt): Bits = {
-    val shiftBits = B(shiftLen, log2Up(DATA_BYTE_CNT) bits)
-    val ret = B(CONTROL_TAIL, CONTROL_TAIL_WIDTH bits) ## B(
-      0,
-      CONTROL_FRAME_LEFT_WIDTH bits
-    ) ##
-      packetLen ## lastSelect ## shiftBits ## B(
-        CONTROL_HEADER,
-        CONTROL_HEADER_WIDTH bits
-      )
+    val shiftBits = B(shiftLen, CONTROL_SHIFT_WIDTH bits)
+    val ret = packetLen  ## shiftBits ## lastSelect ##
+                      B(CONTROL_HEADER, CONTROL_HEADER_WIDTH bits)
     ret
   }
 }

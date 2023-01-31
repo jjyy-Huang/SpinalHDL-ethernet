@@ -10,6 +10,7 @@ addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.10.4")
 lazy val template = (project in file("."))
   .settings(
     name := "test",
+    Compile / scalaSource := baseDirectory.value / "src" / "main" / "scala",
     libraryDependencies ++= Seq(spinalCore, spinalLib, spinalIdslPlugin)
   )
 

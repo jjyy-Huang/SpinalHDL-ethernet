@@ -35,8 +35,8 @@ There is the specification of Rx I/O:
 ![](.pic/txwave.png) 
 
 ## TODO
-- Redesign Rx module control logic
-- ARP request module
-- ICMP module
-- Data Width support 384b/512b
-- Use Cocotb for verification
+- [x] Redesign Rx module control logic
+- [ ] Use Cocotb for verification
+- [ ] ARP request module
+- [ ] ICMP module
+- [x] Data Width support 128b/256b/512b
