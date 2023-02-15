@@ -1,6 +1,6 @@
 package ethernet
 
-import spinal.core.SpinalConfig
+import spinal.core.{SpinalConfig, SpinalVerilog}
 
 import java.util.Calendar
 
@@ -11,8 +11,8 @@ object Main extends App {
   val headerRecognizeConfig = HeaderRecognizerGenerics()
 
   SpinalConfig(
-    targetDirectory = "./src/hdl",
-    oneFilePerComponent = false,
+    targetDirectory = "./hdl",
+    oneFilePerComponent = true,
     removePruned = false,
     rtlHeader = s"""
          |@Author : Jinyuan Huang (Jerry) jjyy.huang@gmail.com
@@ -22,8 +22,8 @@ object Main extends App {
 
 
   SpinalConfig(
-    targetDirectory = "./src/hdl",
-    oneFilePerComponent = false,
+    targetDirectory = "./hdl",
+    oneFilePerComponent = true,
     removePruned = false,
     rtlHeader =
       s"""
